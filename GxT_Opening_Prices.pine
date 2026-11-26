@@ -1,0 +1,172 @@
+//@version=6
+// GxT Opening Prices — configurable time and higher-timeframe open references.
+// Independent visual context module; it does not create trade signals or alerts.
+indicator("GxT Opening Prices", shorttitle = "GxT Opens", overlay = true, max_bars_back = 1000, max_lines_count = 500, max_labels_count = 200, dynamic_requests = true)
+
+string G_GENERAL = "General"
+string G_KEY = "Key time opens"
+string G_HTF = "Higher-timeframe candle opens"
+string G_CUSTOM = "Custom time opens"
+string G_LABEL = "Labels"
+
+string tz = input.timezone("America/New_York", "Reference timezone", group = G_GENERAL)
+int historyDays = input.int(5, "Historical trading days", minval = 0, maxval = 50, group = G_GENERAL, tooltip = "0 shows current-day levels only. Historical drawings are capped to stay within TradingView object limits.")
+int forwardOffset = input.int(0, "Price-line forward offset (bars)", minval = 0, maxval = 50, group = G_GENERAL)
+
+bool dailyOn = input.bool(true, "Daily open", group = G_KEY, inline = "daily")
+string dailyType = input.string("Open Price", "", options = ["Open Price", "Vertical Line", "Both"], group = G_KEY, inline = "daily")
+color dailyColor = input.color(color.silver, "", group = G_KEY, inline = "daily")
+bool midnightOn = input.bool(true, "00:00 open", group = G_KEY, inline = "midnight")
+string midnightType = input.string("Open Price", "", options = ["Open Price", "Vertical Line", "Both"], group = G_KEY, inline = "midnight")
+color midnightColor = input.color(color.purple, "", group = G_KEY, inline = "midnight")
+bool nyOpenOn = input.bool(true, "09:30 open", group = G_KEY, inline = "ny")
+string nyType = input.string("Both", "", options = ["Open Price", "Vertical Line", "Both"], group = G_KEY, inline = "ny")
+color nyColor = input.color(color.orange, "", group = G_KEY, inline = "ny")
+string keyStyleInput = input.string("Dotted", "Key level style", options = ["Solid", "Dashed", "Dotted"], group = G_KEY)
+int keyWidth = input.int(1, "Key level width", minval = 1, maxval = 3, group = G_KEY)
+
+bool htf1On = input.bool(false, "Candle level 1", group = G_HTF, inline = "htf1")
+string htf1 = input.timeframe("240", "TF", group = G_HTF, inline = "htf1")
+int htf1Count = input.int(3, "History", minval = 1, maxval = 5, group = G_HTF, inline = "htf1")
+string htf1Type = input.string("Open Price", "Display", options = ["Open Price", "Vertical Line", "Both"], group = G_HTF)
+color htf1Color = input.color(color.teal, "Color", group = G_HTF, inline = "htf1style")
+string htf1Style = input.string("Dashed", "Style", options = ["Solid", "Dashed", "Dotted"], group = G_HTF, inline = "htf1style")
+int htf1Width = input.int(1, "Width", minval = 1, maxval = 3, group = G_HTF, inline = "htf1style")
+
+bool htf2On = input.bool(false, "Candle level 2", group = G_HTF, inline = "htf2")
+string htf2 = input.timeframe("1D", "TF", group = G_HTF, inline = "htf2")
+int htf2Count = input.int(3, "History", minval = 1, maxval = 5, group = G_HTF, inline = "htf2")
+string htf2Type = input.string("Open Price", "Display 2", options = ["Open Price", "Vertical Line", "Both"], group = G_HTF)
+color htf2Color = input.color(color.blue, "Color 2", group = G_HTF, inline = "htf2style")
+string htf2Style = input.string("Dashed", "Style 2", options = ["Solid", "Dashed", "Dotted"], group = G_HTF, inline = "htf2style")
+int htf2Width = input.int(1, "Width 2", minval = 1, maxval = 3, group = G_HTF, inline = "htf2style")
+
+bool htf3On = input.bool(false, "Candle level 3", group = G_HTF, inline = "htf3")
+string htf3 = input.timeframe("1W", "TF", group = G_HTF, inline = "htf3")
+int htf3Count = input.int(3, "History", minval = 1, maxval = 5, group = G_HTF, inline = "htf3")
+string htf3Type = input.string("Open Price", "Display 3", options = ["Open Price", "Vertical Line", "Both"], group = G_HTF)
+color htf3Color = input.color(color.fuchsia, "Color 3", group = G_HTF, inline = "htf3style")
+string htf3Style = input.string("Dashed", "Style 3", options = ["Solid", "Dashed", "Dotted"], group = G_HTF, inline = "htf3style")
+int htf3Width = input.int(1, "Width 3", minval = 1, maxval = 3, group = G_HTF, inline = "htf3style")
+
+string customLevels = input.text_area("060000,[06:00],Open Price,Dotted,Blue,1\n083000,[London Open],Both,Solid,Green,2\n140000,[2PM],Vertical Line,Dashed,Orange,1", "HHmmss,Label,Type,Style,Color,Width", group = G_CUSTOM, tooltip = "One level per line. Example: 060000,[06:00],Open Price,Dotted,Blue,1. Maximum 20 entries. Time is interpreted in the selected reference timezone.")
+
+string labelMode = input.string("Name", "Label content", options = ["Time", "Name", "None"], group = G_LABEL)
+string labelSizeInput = input.string("Tiny", "Label size", options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = G_LABEL)
+
+f_line_style(string styleName) =>
+    styleName == "Dotted" ? line.style_dotted : styleName == "Dashed" ? line.style_dashed : line.style_solid
+
+f_color(string colorName) =>
+    switch str.lower(str.trim(colorName))
+        "red" => color.red
+        "green" => color.green
+        "blue" => color.blue
+        "yellow" => color.yellow
+        "orange" => color.orange
+        "purple" => color.purple
+        "pink" => color.fuchsia
+        "white" => color.white
+        "black" => color.black
+        => color.gray
+
+f_label_size() =>
+    labelSizeInput == "Tiny" ? size.tiny : labelSizeInput == "Small" ? size.small : labelSizeInput == "Normal" ? size.normal : labelSizeInput == "Large" ? size.large : size.huge
+
+f_label_text(string name, int t) =>
+    labelMode == "None" ? "" : labelMode == "Time" ? str.format_time(t, "HH:mm", tz) : name
+
+f_trim_objects(array<line> priceLines, array<line> verticalLines, array<label> levelLabels, int maxLevels) =>
+    while array.size(priceLines) > maxLevels
+        line.delete(array.shift(priceLines))
+    while array.size(verticalLines) > maxLevels
+        line.delete(array.shift(verticalLines))
+    while array.size(levelLabels) > maxLevels
+        label.delete(array.shift(levelLabels))
+
+f_add_open(array<line> priceLines, array<line> verticalLines, array<label> levelLabels, int t, float price, string name, string displayType, string styleName, color levelColor, int width, int maxLevels) =>
+    int barMs = int(nz(timeframe.in_seconds() * 1000, 60000))
+    bool drawPrice = displayType == "Open Price" or displayType == "Both"
+    bool drawVertical = displayType == "Vertical Line" or displayType == "Both"
+    if drawPrice
+        line priceLine = line.new(t, price, t + barMs * forwardOffset, price, xloc = xloc.bar_time, extend = forwardOffset == 0 ? extend.right : extend.none, color = levelColor, style = f_line_style(styleName), width = width)
+        array.push(priceLines, priceLine)
+    if drawVertical
+        line verticalLine = line.new(t, low, t, high, xloc = xloc.bar_time, extend = extend.both, color = levelColor, style = f_line_style(styleName), width = width)
+        array.push(verticalLines, verticalLine)
+    string text = f_label_text(name, t)
+    if text != ""
+        array.push(levelLabels, label.new(t, price, text, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(levelColor, 100), textcolor = levelColor, size = f_label_size()))
+    int objectLimit = math.max(1, int(math.floor(450.0 / math.max(1, (drawPrice ? 1 : 0) + (drawVertical ? 1 : 0)))))
+    f_trim_objects(priceLines, verticalLines, levelLabels, math.min(maxLevels, objectLimit))
+
+f_process_time(array<line> priceLines, array<line> verticalLines, array<label> levelLabels, array<int> lastKeys, int slot, bool enabled, int hh, int mm, string name, string displayType, string styleName, color levelColor, int width) =>
+    int minuteNow = hour(time, tz) * 60 + minute(time, tz)
+    int targetMinute = hh * 60 + mm
+    int dateKey = year(time, tz) * 10000 + month(time, tz) * 100 + dayofmonth(time, tz)
+    int previousKey = array.get(lastKeys, slot)
+    bool match = timeframe.isintraday and minuteNow == targetMinute and dateKey != previousKey
+    if enabled and match
+        array.set(lastKeys, slot, dateKey)
+        f_add_open(priceLines, verticalLines, levelLabels, time, open, name, displayType, styleName, levelColor, width, historyDays + 1)
+
+f_htf_open(string tf) =>
+    request.security(syminfo.tickerid, tf, [open, time], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+var array<line> priceLines = array.new<line>()
+var array<line> verticalLines = array.new<line>()
+var array<label> openLabels = array.new<label>()
+var array<int> lastTimeKeys = array.new_int(6, na)
+
+if barstate.isconfirmed
+    f_process_time(priceLines, verticalLines, openLabels, lastTimeKeys, 0, dailyOn, 0, 0, "Daily Open", "Open Price", keyStyleInput, dailyColor, keyWidth)
+    f_process_time(priceLines, verticalLines, openLabels, lastTimeKeys, 1, midnightOn, 0, 0, "00:00 Open", midnightType, keyStyleInput, midnightColor, keyWidth)
+    f_process_time(priceLines, verticalLines, openLabels, lastTimeKeys, 2, nyOpenOn, 9, 30, "09:30 Open", nyType, keyStyleInput, nyColor, keyWidth)
+
+// Custom levels: parse at most 20 CSV rows, then draw only on the matching minute.
+var array<int> customDateKeys = array.new_int(20, na)
+if barstate.isconfirmed and timeframe.isintraday
+    array<string> rows = str.split(customLevels, "\n")
+    int rowCount = math.min(array.size(rows), 20)
+    for i = 0 to rowCount - 1
+        string row = str.trim(array.get(rows, i))
+        array<string> fields = str.split(row, ",")
+        if array.size(fields) >= 6
+            string rawTime = str.trim(array.get(fields, 0))
+            string levelName = str.trim(str.replace_all(str.replace_all(array.get(fields, 1), "[", ""), "]", ""))
+            string displayType = str.trim(array.get(fields, 2))
+            string styleName = str.trim(array.get(fields, 3))
+            color levelColor = f_color(array.get(fields, 4))
+            int width = int(math.max(1, math.min(3, nz(str.tonumber(str.trim(array.get(fields, 5))), 1))))
+            if str.length(rawTime) == 6
+                int hh = int(nz(str.tonumber(str.substring(rawTime, 0, 2)), -1))
+                int mm = int(nz(str.tonumber(str.substring(rawTime, 2, 4)), -1))
+                int ss = int(nz(str.tonumber(str.substring(rawTime, 4, 6)), -1))
+                int nowKey = year(time, tz) * 10000 + month(time, tz) * 100 + dayofmonth(time, tz)
+                int priorKey = array.get(customDateKeys, i)
+                bool atTime = hour(time, tz) == hh and minute(time, tz) == mm and second(time, tz) == ss
+                if atTime and nowKey != priorKey
+                    array.set(customDateKeys, i, nowKey)
+                    f_add_open(priceLines, verticalLines, openLabels, time, open, levelName, displayType, styleName, levelColor, width, historyDays + 1)
+
+// Higher-timeframe candle opens: display the configured most recent levels.
+var array<int> lastHtfTimes = array.new_int(3, na)
+var array<line> htfPriceLines = array.new<line>()
+var array<line> htfVerticalLines = array.new<line>()
+var array<label> htfLabels = array.new<label>()
+[o1, t1] = f_htf_open(htf1)
+[o2, t2] = f_htf_open(htf2)
+[o3, t3] = f_htf_open(htf3)
+
+f_draw_htf(array<int> lastTimes, int slot, bool enabled, string tf, int count, string displayType, color levelColor, string styleName, int width, float levelPrice, int levelTime) =>
+    int prevTime = array.get(lastTimes, slot)
+    if enabled and not na(levelPrice) and not na(levelTime) and levelTime != prevTime
+        array.set(lastTimes, slot, levelTime)
+        f_add_open(htfPriceLines, htfVerticalLines, htfLabels, levelTime, levelPrice, tf + " Open", displayType, styleName, levelColor, width, count)
+
+if barstate.isconfirmed
+    f_draw_htf(lastHtfTimes, 0, htf1On, htf1, htf1Count, htf1Type, htf1Color, htf1Style, htf1Width, o1, t1)
+    f_draw_htf(lastHtfTimes, 1, htf2On, htf2, htf2Count, htf2Type, htf2Color, htf2Style, htf2Width, o2, t2)
+    f_draw_htf(lastHtfTimes, 2, htf3On, htf3, htf3Count, htf3Type, htf3Color, htf3Style, htf3Width, o3, t3)
+
+// No alertcondition() or alert() calls. Opening levels are descriptive chart references only.
