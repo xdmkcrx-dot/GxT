@@ -1,0 +1,67 @@
+//@version=6
+// GxT User Support — informational chart context only.
+// This script provides visual reference levels and a neutral context panel.
+// It intentionally does not generate trade entries, buy/sell signals, or alerts.
+indicator("GxT User Support", shorttitle = "GxT Support", overlay = true)
+
+// ── Display options ──────────────────────────────────────────────────────
+string GROUP_LEVELS = "Reference levels"
+string GROUP_CONTEXT = "Context panel"
+
+showPreviousDay = input.bool(true, "Previous day high / low", group = GROUP_LEVELS)
+showPreviousWeek = input.bool(false, "Previous week high / low", group = GROUP_LEVELS)
+showRange = input.bool(true, "Rolling chart range", group = GROUP_LEVELS)
+rangeLength = input.int(50, "Rolling range bars", minval = 5, maxval = 500, group = GROUP_LEVELS)
+
+showPanel = input.bool(true, "Show information panel", group = GROUP_CONTEXT)
+panelPosition = input.string("Top Right", "Panel position", options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group = GROUP_CONTEXT)
+panelTextSize = input.string("Small", "Panel text size", options = ["Tiny", "Small", "Normal"], group = GROUP_CONTEXT)
+
+f_position(string choice) =>
+    choice == "Top Left" ? position.top_left : choice == "Bottom Left" ? position.bottom_left : choice == "Bottom Right" ? position.bottom_right : position.top_right
+
+f_text_size(string choice) =>
+    choice == "Tiny" ? size.tiny : choice == "Normal" ? size.normal : size.small
+
+f_price(float value) =>
+    na(value) ? "n/a" : str.tostring(value, format.mintick)
+
+f_panel_row(table panel, int row, string heading, string value, string textSize) =>
+    table.cell(panel, 0, row, heading, text_color = color.rgb(105, 115, 130), text_size = textSize, text_halign = text.align_left)
+    table.cell(panel, 1, row, value, text_color = color.rgb(35, 45, 60), text_size = textSize, text_halign = text.align_left)
+
+// Completed higher-timeframe bars only; lookahead_on makes prior-period levels
+// available consistently throughout the current period without using its future data.
+[previousDayHigh, previousDayLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+[previousWeekHigh, previousWeekLow] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+plot(showPreviousDay ? previousDayHigh : na, "Previous day high", color = color.new(color.blue, 10), style = plot.style_stepline)
+plot(showPreviousDay ? previousDayLow : na, "Previous day low", color = color.new(color.blue, 10), style = plot.style_stepline)
+plot(showPreviousWeek ? previousWeekHigh : na, "Previous week high", color = color.new(color.purple, 10), style = plot.style_stepline)
+plot(showPreviousWeek ? previousWeekLow : na, "Previous week low", color = color.new(color.purple, 10), style = plot.style_stepline)
+
+rollingHigh = ta.highest(high, rangeLength)
+rollingLow = ta.lowest(low, rangeLength)
+plot(showRange ? rollingHigh : na, "Rolling range high", color = color.new(color.gray, 55), style = plot.style_linebr)
+plot(showRange ? rollingLow : na, "Rolling range low", color = color.new(color.gray, 55), style = plot.style_linebr)
+
+float rangePercent = na
+if not na(rollingHigh) and not na(rollingLow) and rollingHigh > rollingLow
+    rangePercent := (close - rollingLow) / (rollingHigh - rollingLow) * 100.0
+
+string rangeLocation = na(rangePercent) ? "n/a" : str.tostring(math.round(rangePercent)) + "% from rolling low"
+string dayReferences = "H " + f_price(previousDayHigh) + " / L " + f_price(previousDayLow)
+string weekReferences = "H " + f_price(previousWeekHigh) + " / L " + f_price(previousWeekLow)
+
+var table panel = na
+if barstate.islast and showPanel
+    if na(panel)
+        panel := table.new(f_position(panelPosition), 2, 6, bgcolor = color.new(color.white, 5), frame_color = color.new(color.gray, 70), frame_width = 1)
+    f_panel_row(panel, 0, "GxT · CONTEXT", syminfo.ticker + " · " + timeframe.period, panelTextSize)
+    f_panel_row(panel, 1, "Last price", f_price(close), panelTextSize)
+    f_panel_row(panel, 2, "Previous day", dayReferences, panelTextSize)
+    f_panel_row(panel, 3, "Previous week", weekReferences, panelTextSize)
+    f_panel_row(panel, 4, "Rolling range", str.tostring(rangeLength) + " bars · " + rangeLocation, panelTextSize)
+    f_panel_row(panel, 5, "Purpose", "Reference only · no trade signals", panelTextSize)
+else if barstate.islast and not na(panel)
+    table.clear(panel, 0, 0, 1, 5)
