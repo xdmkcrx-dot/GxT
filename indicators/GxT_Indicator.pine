@@ -1,0 +1,318 @@
+//@version=6
+// GxT Framework — visual market-structure context for TradingView.
+// This indicator is an analysis aid, not a trading signal or financial advice.
+indicator("GxT Framework V3 (Optimized)", shorttitle = "GxT FW V3", overlay = true, max_bars_back = 1000, max_lines_count = 100, max_boxes_count = 50, max_labels_count = 100)
+
+// ── Inputs ────────────────────────────────────────────────────────────────
+string GRP_STRUCTURE = "Structure · MSS/BOS · C2/C3"
+string GRP_LEVELS = "Liquidity levels"
+string GRP_SESSIONS = "Sessions"
+string GRP_DQT = "Daily time cycle"
+string GRP_PANEL = "Narrative panel"
+
+int swingLen = input.int(5, "Swing strength (left/right)", minval = 2, maxval = 20, group = GRP_STRUCTURE)
+bool showSwings = input.bool(false, "Show confirmed swing points", group = GRP_STRUCTURE)
+bool showMss = input.bool(true, "Show MSS", group = GRP_STRUCTURE)
+bool showBos = input.bool(false, "Show BOS", group = GRP_STRUCTURE)
+bool showC2 = input.bool(true, "Show C2 liquidity sweeps", group = GRP_STRUCTURE)
+bool showC3 = input.bool(true, "Show C3 confirmation", group = GRP_STRUCTURE)
+int c3Window = input.int(30, "C3 confirmation window (bars)", minval = 5, maxval = 200, group = GRP_STRUCTURE)
+int dispLen = input.int(20, "Displacement baseline", minval = 5, maxval = 100, group = GRP_STRUCTURE)
+float dispMult = input.float(1.5, "Body vs. average body", minval = 0.5, step = 0.1, group = GRP_STRUCTURE)
+float dispFraction = input.float(0.6, "Minimum body / candle range", minval = 0.1, maxval = 1.0, step = 0.05, group = GRP_STRUCTURE)
+bool showIrl = input.bool(true, "Show latest swing range (IRL)", group = GRP_STRUCTURE)
+bool showEq = input.bool(true, "Show equilibrium (50%)", group = GRP_STRUCTURE)
+int keepMarks = input.int(8, "Recent structure labels", minval = 1, maxval = 30, group = GRP_STRUCTURE)
+
+bool showDailyLevels = input.bool(true, "Previous day high / low", group = GRP_LEVELS)
+bool showWeeklyLevels = input.bool(false, "Previous week high / low", group = GRP_LEVELS)
+
+bool showSessions = input.bool(true, "Shade sessions", group = GRP_SESSIONS)
+string timezone = input.string("America/New_York", "Reference timezone", group = GRP_SESSIONS)
+string asiaSession = input.session("2000-0000", "Asia", group = GRP_SESSIONS)
+string londonSession = input.session("0200-0500", "London", group = GRP_SESSIONS)
+string nySession = input.session("0930-1100", "New York", group = GRP_SESSIONS)
+
+bool showDqt = input.bool(true, "Show six-hour cycle boxes", group = GRP_DQT)
+string cycleAnchor = input.string("18:00", "Cycle start (reference timezone)", options = ["18:00", "00:00"], group = GRP_DQT)
+int keepCycles = input.int(8, "Recent cycle boxes", minval = 1, maxval = 20, group = GRP_DQT)
+
+bool showPanel = input.bool(false, "Show context panel", group = GRP_PANEL)
+string panelPosition = input.string("Bottom Right", "Position", options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group = GRP_PANEL)
+
+color highColor = input.color(color.rgb(213, 92, 92), "Swing high / BSL", group = GRP_STRUCTURE, inline = "swingColor")
+color lowColor = input.color(color.rgb(60, 150, 130), "Swing low / SSL", group = GRP_STRUCTURE, inline = "swingColor")
+color mssColor = input.color(color.rgb(205, 130, 40), "MSS", group = GRP_STRUCTURE, inline = "breakColor")
+color bosColor = input.color(color.rgb(110, 120, 140), "BOS", group = GRP_STRUCTURE, inline = "breakColor")
+color irlColor = input.color(color.new(color.rgb(105, 130, 175), 88), "IRL fill", group = GRP_STRUCTURE)
+color eqColor = input.color(color.rgb(190, 145, 65), "EQ", group = GRP_STRUCTURE)
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+trimLabels(array<label> labels, int limit) =>
+    while array.size(labels) > limit
+        label.delete(array.shift(labels))
+
+panelPos(string value) =>
+    value == "Top Left" ? position.top_left : value == "Top Right" ? position.top_right : value == "Bottom Left" ? position.bottom_left : position.bottom_right
+
+// ── Confirmed swing structure ────────────────────────────────────────────
+float pivotHigh = ta.pivothigh(high, swingLen, swingLen)
+float pivotLow = ta.pivotlow(low, swingLen, swingLen)
+bool newSwingHigh = barstate.isconfirmed and not na(pivotHigh)
+bool newSwingLow = barstate.isconfirmed and not na(pivotLow)
+int pivotBar = bar_index - swingLen
+
+plotshape(showSwings and newSwingHigh, title = "Confirmed swing high", style = shape.circle, location = location.abovebar, color = highColor, size = size.tiny, offset = -swingLen)
+plotshape(showSwings and newSwingLow, title = "Confirmed swing low", style = shape.circle, location = location.belowbar, color = lowColor, size = size.tiny, offset = -swingLen)
+
+var float swingHigh = na
+var float swingLow = na
+var float previousSwingHigh = na
+var float previousSwingLow = na
+var int swingHighBar = na
+var int swingLowBar = na
+var bool highSwept = false
+var bool lowSwept = false
+var bool highBroken = false
+var bool lowBroken = false
+var int trend = 0
+var int pendingC2 = 0
+var int pendingC2Bar = na
+var float pendingC2Extreme = na
+var label pendingC2Label = na
+var array<label> structureLabels = array.new<label>()
+
+if newSwingHigh
+    previousSwingHigh := swingHigh
+    swingHigh := pivotHigh
+    swingHighBar := pivotBar
+    highSwept := false
+    highBroken := false
+if newSwingLow
+    previousSwingLow := swingLow
+    swingLow := pivotLow
+    swingLowBar := pivotBar
+    lowSwept := false
+    lowBroken := false
+
+if (newSwingHigh or newSwingLow) and not na(previousSwingHigh) and not na(previousSwingLow) and not na(swingHigh) and not na(swingLow)
+    if swingHigh > previousSwingHigh and swingLow > previousSwingLow
+        trend := 1
+    else if swingHigh < previousSwingHigh and swingLow < previousSwingLow
+        trend := -1
+
+float candleBody = math.abs(close - open)
+float candleRange = high - low
+float averageBody = ta.sma(candleBody, dispLen)[1]
+bool displacement = candleBody > 0 and candleRange > 0 and averageBody > 0 and candleBody >= dispMult * averageBody and candleBody / candleRange >= dispFraction
+bool displacementUp = displacement and close > open
+bool displacementDown = displacement and close < open
+float tick = syminfo.mintick
+
+bool mssUp = false
+bool mssDown = false
+bool bosUp = false
+bool bosDown = false
+if barstate.isconfirmed
+    if not na(swingHigh) and not highBroken and close >= swingHigh + tick
+        if trend == -1 and displacementUp
+            mssUp := true
+            trend := 1
+        else if trend == 1
+            bosUp := true
+        if mssUp or bosUp
+            highBroken := true
+            if mssUp or showBos
+                string txt = mssUp ? "MSS ▲" : "BOS ▲"
+                color txtColor = mssUp ? mssColor : bosColor
+                array.push(structureLabels, label.new(swingHighBar, swingHigh, txt, xloc = xloc.bar_index, style = label.style_label_down, color = color.new(txtColor, 100), textcolor = txtColor, size = size.tiny))
+    if not na(swingLow) and not lowBroken and close <= swingLow - tick
+        if trend == 1 and displacementDown
+            mssDown := true
+            trend := -1
+        else if trend == -1
+            bosDown := true
+        if mssDown or bosDown
+            lowBroken := true
+            if mssDown or showBos
+                string txt = mssDown ? "MSS ▼" : "BOS ▼"
+                color txtColor = mssDown ? mssColor : bosColor
+                array.push(structureLabels, label.new(swingLowBar, swingLow, txt, xloc = xloc.bar_index, style = label.style_label_up, color = color.new(txtColor, 100), textcolor = txtColor, size = size.tiny))
+    trimLabels(structureLabels, keepMarks)
+
+// C2: one-tick sweep and close back inside a confirmed swing. C3: next valid pivot,
+// before the C2 extreme is broken and within the configured bar window.
+bool c2Bearish = false
+bool c2Bullish = false
+bool c3Bearish = false
+bool c3Bullish = false
+if barstate.isconfirmed
+    if pendingC2 != 0 and bar_index > pendingC2Bar
+        bool invalidated = pendingC2 == -1 ? high > pendingC2Extreme : low < pendingC2Extreme
+        if invalidated or bar_index - pendingC2Bar > c3Window
+            if invalidated and not na(pendingC2Label)
+                label.set_text(pendingC2Label, "xC2")
+                label.set_textcolor(pendingC2Label, color.red)
+            pendingC2 := 0
+    if pendingC2 == -1 and newSwingHigh and pivotBar > pendingC2Bar
+        c3Bearish := true
+        pendingC2 := 0
+        if showC3
+            array.push(structureLabels, label.new(pivotBar, pivotHigh, "C3 ✓", xloc = xloc.bar_index, style = label.style_label_down, color = color.new(highColor, 100), textcolor = highColor, size = size.tiny))
+    if pendingC2 == 1 and newSwingLow and pivotBar > pendingC2Bar
+        c3Bullish := true
+        pendingC2 := 0
+        if showC3
+            array.push(structureLabels, label.new(pivotBar, pivotLow, "C3 ✓", xloc = xloc.bar_index, style = label.style_label_up, color = color.new(lowColor, 100), textcolor = lowColor, size = size.tiny))
+    bool sweepHigh = not na(swingHigh) and not highSwept and not highBroken and high >= swingHigh + tick and close < swingHigh
+    bool sweepLow = not na(swingLow) and not lowSwept and not lowBroken and low <= swingLow - tick and close > swingLow
+    if sweepHigh and sweepLow
+        sweepHigh := false
+        sweepLow := false
+    if sweepHigh
+        c2Bearish := true
+        highSwept := true
+        pendingC2 := -1
+        pendingC2Bar := bar_index
+        pendingC2Extreme := high
+        if showC2
+            pendingC2Label := label.new(bar_index, high, "C2", style = label.style_label_down, color = color.new(highColor, 100), textcolor = highColor, size = size.tiny)
+            array.push(structureLabels, pendingC2Label)
+    if sweepLow
+        c2Bullish := true
+        lowSwept := true
+        pendingC2 := 1
+        pendingC2Bar := bar_index
+        pendingC2Extreme := low
+        if showC2
+            pendingC2Label := label.new(bar_index, low, "C2", style = label.style_label_up, color = color.new(lowColor, 100), textcolor = lowColor, size = size.tiny)
+            array.push(structureLabels, pendingC2Label)
+    trimLabels(structureLabels, keepMarks * 3)
+
+// ── Internal range and equilibrium ───────────────────────────────────────
+var box irlBox = na
+var line eqLine = na
+var label eqLabel = na
+if showIrl and not na(swingHigh) and not na(swingLow) and not na(swingHighBar) and not na(swingLowBar)
+    int leftBar = math.min(swingHighBar, swingLowBar)
+    float rangeHigh = math.max(swingHigh, swingLow)
+    float rangeLow = math.min(swingHigh, swingLow)
+    float equilibrium = (rangeHigh + rangeLow) * 0.5
+    if na(irlBox)
+        irlBox := box.new(leftBar, rangeHigh, bar_index, rangeLow, bgcolor = irlColor, border_color = color.new(irlColor, 35))
+    else
+        box.set_left(irlBox, leftBar)
+        box.set_right(irlBox, bar_index)
+        box.set_top(irlBox, rangeHigh)
+        box.set_bottom(irlBox, rangeLow)
+    if showEq
+        if na(eqLine)
+            eqLine := line.new(leftBar, equilibrium, bar_index, equilibrium, color = eqColor, style = line.style_dotted)
+            eqLabel := label.new(bar_index, equilibrium, "EQ", style = label.style_label_left, color = color.new(eqColor, 100), textcolor = eqColor, size = size.tiny)
+        else
+            line.set_xy1(eqLine, leftBar, equilibrium)
+            line.set_xy2(eqLine, bar_index, equilibrium)
+            label.set_xy(eqLabel, bar_index, equilibrium)
+    else
+        if not na(eqLine)
+            line.delete(eqLine)
+            eqLine := na
+        if not na(eqLabel)
+            label.delete(eqLabel)
+            eqLabel := na
+else if not showIrl and not na(irlBox)
+    box.delete(irlBox)
+    irlBox := na
+    if not na(eqLine)
+        line.delete(eqLine)
+        eqLine := na
+    if not na(eqLabel)
+        label.delete(eqLabel)
+        eqLabel := na
+
+// ── Higher-timeframe liquidity levels (previous completed periods) ────────
+float previousDayHigh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_on)
+float previousDayLow = request.security(syminfo.tickerid, "D", low[1], lookahead = barmerge.lookahead_on)
+float previousWeekHigh = request.security(syminfo.tickerid, "W", high[1], lookahead = barmerge.lookahead_on)
+float previousWeekLow = request.security(syminfo.tickerid, "W", low[1], lookahead = barmerge.lookahead_on)
+plot(showDailyLevels ? previousDayHigh : na, "PDH", color = color.new(color.rgb(86, 128, 190), 10), style = plot.style_linebr, linewidth = 1)
+plot(showDailyLevels ? previousDayLow : na, "PDL", color = color.new(color.rgb(86, 128, 190), 10), style = plot.style_linebr, linewidth = 1)
+plot(showWeeklyLevels ? previousWeekHigh : na, "PWH", color = color.new(color.rgb(130, 98, 170), 10), style = plot.style_linebr, linewidth = 1)
+plot(showWeeklyLevels ? previousWeekLow : na, "PWL", color = color.new(color.rgb(130, 98, 170), 10), style = plot.style_linebr, linewidth = 1)
+bool dailyHighSweep = showDailyLevels and barstate.isconfirmed and high >= previousDayHigh + tick and high[1] < previousDayHigh + tick
+bool dailyLowSweep = showDailyLevels and barstate.isconfirmed and low <= previousDayLow - tick and low[1] > previousDayLow - tick
+bool weeklyHighSweep = showWeeklyLevels and barstate.isconfirmed and high >= previousWeekHigh + tick and high[1] < previousWeekHigh + tick
+bool weeklyLowSweep = showWeeklyLevels and barstate.isconfirmed and low <= previousWeekLow - tick and low[1] > previousWeekLow - tick
+bool liquiditySweep = dailyHighSweep or dailyLowSweep or weeklyHighSweep or weeklyLowSweep
+
+// ── Session shading ──────────────────────────────────────────────────────
+bool inAsia = showSessions and not na(time(timeframe.period, asiaSession, timezone))
+bool inLondon = showSessions and not na(time(timeframe.period, londonSession, timezone))
+bool inNewYork = showSessions and not na(time(timeframe.period, nySession, timezone))
+bgcolor(inAsia ? color.new(color.rgb(238, 181, 107), 92) : inLondon ? color.new(color.rgb(110, 90, 160), 92) : inNewYork ? color.new(color.rgb(11, 120, 102), 92) : na, title = "Session shading")
+
+// ── Six-hour cycle boxes ─────────────────────────────────────────────────
+int anchorHour = cycleAnchor == "18:00" ? 18 : 0
+int anchorToday = timestamp(timezone, year(time, timezone), month(time, timezone), dayofmonth(time, timezone), anchorHour, 0)
+int cycleStart = time >= anchorToday ? anchorToday : anchorToday - 86400000
+int elapsed = time - cycleStart
+int quarter = math.min(3, int(math.floor(elapsed / 21600000)))
+int blockStart = cycleStart + quarter * 21600000
+color quarterColor = quarter == 0 ? color.rgb(150, 160, 180) : quarter == 1 ? color.rgb(213, 157, 166) : quarter == 2 ? color.rgb(143, 190, 157) : color.rgb(222, 190, 125)
+string quarterTag = "Q" + str.tostring(quarter + 1) + (anchorHour == 18 ? (quarter == 0 ? " · A" : quarter == 1 ? " · M" : quarter == 2 ? " · D" : " · C/R") : "")
+var array<box> cycleBoxes = array.new<box>()
+var array<label> cycleLabels = array.new<label>()
+var box activeCycleBox = na
+var label activeCycleLabel = na
+var int activeBlockStart = na
+var float activeBlockHigh = na
+var float activeBlockLow = na
+if showDqt and timeframe.isintraday
+    if na(activeBlockStart) or blockStart != activeBlockStart
+        activeBlockStart := blockStart
+        activeBlockHigh := high
+        activeBlockLow := low
+        activeCycleBox := box.new(blockStart, high, blockStart + 21600000, low, xloc = xloc.bar_time, bgcolor = color.new(quarterColor, 92), border_color = color.new(quarterColor, 100))
+        activeCycleLabel := label.new(blockStart, high, quarterTag, xloc = xloc.bar_time, style = label.style_label_down, color = color.new(quarterColor, 100), textcolor = color.rgb(105, 115, 130), size = size.tiny)
+        array.push(cycleBoxes, activeCycleBox)
+        array.push(cycleLabels, activeCycleLabel)
+        while array.size(cycleBoxes) > keepCycles * 4
+            box.delete(array.shift(cycleBoxes))
+        while array.size(cycleLabels) > keepCycles * 4
+            label.delete(array.shift(cycleLabels))
+    else
+        activeBlockHigh := math.max(activeBlockHigh, high)
+        activeBlockLow := math.min(activeBlockLow, low)
+        box.set_top(activeCycleBox, activeBlockHigh)
+        box.set_bottom(activeCycleBox, activeBlockLow)
+        label.set_y(activeCycleLabel, activeBlockHigh)
+
+// ── Optional facts-only panel ────────────────────────────────────────────
+var table panel = na
+if barstate.islast and showPanel
+    if na(panel)
+        panel := table.new(panelPos(panelPosition), 2, 5, bgcolor = color.new(color.white, 8), frame_color = color.new(color.gray, 60), frame_width = 1)
+    string trendText = trend == 1 ? "Bullish structure" : trend == -1 ? "Bearish structure" : "Unclassified"
+    string rangeText = not na(swingHigh) and not na(swingLow) and swingHigh != swingLow ? (close >= (swingHigh + swingLow) * 0.5 ? "Premium" : "Discount") : "n/a"
+    string cycleText = "Q" + str.tostring(quarter + 1) + " · " + str.format_time(time, "HH:mm", timezone)
+    table.cell(panel, 0, 0, "GxT · CONTEXT", text_color = color.rgb(35, 45, 60), text_halign = text.align_left)
+    table.cell(panel, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color = color.rgb(35, 45, 60), text_halign = text.align_left)
+    table.cell(panel, 0, 1, "Structure", text_color = color.gray, text_halign = text.align_left)
+    table.cell(panel, 1, 1, trendText, text_color = color.rgb(35, 45, 60), text_halign = text.align_left)
+    table.cell(panel, 0, 2, "Current range", text_color = color.gray, text_halign = text.align_left)
+    table.cell(panel, 1, 2, rangeText, text_color = color.rgb(35, 45, 60), text_halign = text.align_left)
+    table.cell(panel, 0, 3, "Cycle", text_color = color.gray, text_halign = text.align_left)
+    table.cell(panel, 1, 3, cycleText, text_color = color.rgb(35, 45, 60), text_halign = text.align_left)
+    table.cell(panel, 0, 4, "Latest sweep", text_color = color.gray, text_halign = text.align_left)
+    table.cell(panel, 1, 4, liquiditySweep ? (dailyHighSweep or weeklyHighSweep ? "High liquidity" : "Low liquidity") : "—", text_color = color.rgb(35, 45, 60), text_halign = text.align_left)
+
+// ── Alerts: conditions are evaluated on confirmed candles ─────────────────
+alertcondition(mssUp, "GxT MSS Bullish", "Bullish MSS: displacement closed above a confirmed swing high.")
+alertcondition(mssDown, "GxT MSS Bearish", "Bearish MSS: displacement closed below a confirmed swing low.")
+alertcondition(bosUp, "GxT BOS Bullish", "Bullish BOS: close broke a confirmed swing high in an uptrend.")
+alertcondition(bosDown, "GxT BOS Bearish", "Bearish BOS: close broke a confirmed swing low in a downtrend.")
+alertcondition(c2Bullish, "GxT C2 Bullish", "Bullish C2: sell-side swing liquidity swept and price closed back inside.")
+alertcondition(c2Bearish, "GxT C2 Bearish", "Bearish C2: buy-side swing liquidity swept and price closed back inside.")
+alertcondition(c3Bullish, "GxT C3 Bullish", "Bullish C3: confirmed swing low after C2.")
+alertcondition(c3Bearish, "GxT C3 Bearish", "Bearish C3: confirmed swing high after C2.")
+alertcondition(liquiditySweep, "GxT HTF Liquidity Sweep", "A previous day/week high or low was swept.")
