@@ -1,0 +1,204 @@
+//@version=6
+// GxT PO3 + prior-day context. Visual reference only; no signals or alerts.
+// The current HTF candle is live and can change until that HTF period closes.
+indicator("GxT PO3 + PDH/PDL Context", shorttitle = "GxT PO3·PD", overlay = true, max_bars_back = 1000, max_lines_count = 30, max_boxes_count = 5, max_labels_count = 5)
+
+// ── Timeframe ────────────────────────────────────────────────────────────
+string GROUP_TF = "Timeframe"
+string GROUP_CANDLE = "PO3 candle context"
+string GROUP_LEVELS = "Prior-day references"
+string GROUP_DIVIDERS = "Timeframe dividers"
+string GROUP_CLOSE = "HTF close reference"
+
+bool autoTf = input.bool(true, "Auto-select context timeframe", group = GROUP_TF)
+string manualTf = input.timeframe("15", "Manual timeframe", options = ["5", "15", "30", "60", "240", "1D", "1W", "1M"], group = GROUP_TF)
+int candleOffset = input.int(0, "PO3 drawing offset", minval = -50, maxval = 50, group = GROUP_CANDLE)
+color bullColor = input.color(color.green, "Bullish body", group = GROUP_CANDLE, inline = "body")
+color bearColor = input.color(color.black, "Bearish body", group = GROUP_CANDLE, inline = "body")
+color outsideColor = input.color(color.orange, "Outside-close context", group = GROUP_CANDLE)
+color borderColor = input.color(color.black, "Body and wick border", group = GROUP_CANDLE)
+bool showTfLabel = input.bool(true, "Show context timeframe label", group = GROUP_CANDLE)
+
+bool showPDH = input.bool(true, "Previous day high", group = GROUP_LEVELS, inline = "pd")
+bool showPDL = input.bool(true, "Previous day low", group = GROUP_LEVELS, inline = "pd")
+color pdColor = input.color(color.rgb(86, 128, 190), "PDH / PDL color", group = GROUP_LEVELS)
+
+bool showDividers = input.bool(true, "Show recent context-period dividers", group = GROUP_DIVIDERS)
+int dividerCount = input.int(4, "Divider count", minval = 1, maxval = 20, group = GROUP_DIVIDERS)
+color dividerColor = input.color(color.new(color.gray, 50), "Divider color", group = GROUP_DIVIDERS)
+
+bool showCloseReference = input.bool(true, "Show next HTF close line", group = GROUP_CLOSE)
+color closeColor = input.color(color.new(color.white, 20), "HTF close line color", group = GROUP_CLOSE)
+
+string autoTfValue = switch timeframe.period
+    "1" => "15"
+    "3" => "30"
+    "5" => "60"
+    "15" => "240"
+    "60" => "1D"
+    "1D" => "1M"
+    "1W" => "1M"
+    => manualTf
+string contextTf = autoTf ? autoTfValue : manualTf
+float chartSeconds = timeframe.in_seconds()
+float contextSeconds = timeframe.in_seconds(contextTf)
+bool validContextTf = not na(chartSeconds) and not na(contextSeconds) and contextSeconds >= chartSeconds
+string requestTf = validContextTf ? contextTf : timeframe.period
+
+// Current HTF candle is developing; earlier candles are completed.
+[currO, currH, currL, currC, prevO, prevH, prevL, prevC, prev2O, prev2H, prev2L, prev2C, prev3O, prev3H, prev3L, prev3C] = request.security(syminfo.tickerid, requestTf, [open, high, low, close, open[1], high[1], low[1], close[1], open[2], high[2], low[2], close[2], open[3], high[3], low[3], close[3]], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+// PDH/PDL are previous completed daily-bar extremes. Anchor the dotted lines
+// at the previous daily candle's close and extend them into the current period.
+[pdh, pdl, priorDayCloseTime] = request.security(syminfo.tickerid, "D", [high[1], low[1], time_close[1]], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+var line pdhLine = na
+var line pdlLine = na
+var label pdhLabel = na
+var label pdlLabel = na
+var int pdReferenceTime = na
+
+if barstate.islast
+    if not na(pdh) and not na(pdl) and not na(priorDayCloseTime)
+        if na(pdhLine) or priorDayCloseTime != pdReferenceTime
+            if not na(pdhLine)
+                line.delete(pdhLine)
+                line.delete(pdlLine)
+                label.delete(pdhLabel)
+                label.delete(pdlLabel)
+            pdReferenceTime := priorDayCloseTime
+            pdhLine := line.new(priorDayCloseTime, pdh, time, pdh, xloc = xloc.bar_time, extend = extend.right, color = pdColor, style = line.style_dotted, width = 1)
+            pdlLine := line.new(priorDayCloseTime, pdl, time, pdl, xloc = xloc.bar_time, extend = extend.right, color = pdColor, style = line.style_dotted, width = 1)
+            pdhLabel := label.new(time, pdh, "PDH", xloc = xloc.bar_time, style = label.style_label_left, color = color.new(pdColor, 100), textcolor = pdColor, size = size.tiny)
+            pdlLabel := label.new(time, pdl, "PDL", xloc = xloc.bar_time, style = label.style_label_left, color = color.new(pdColor, 100), textcolor = pdColor, size = size.tiny)
+        else
+            line.set_y1(pdhLine, pdh)
+            line.set_y2(pdhLine, pdh)
+            line.set_y1(pdlLine, pdl)
+            line.set_y2(pdlLine, pdl)
+            line.set_color(pdhLine, showPDH ? pdColor : color.new(pdColor, 100))
+            line.set_color(pdlLine, showPDL ? pdColor : color.new(pdColor, 100))
+            label.set_xy(pdhLabel, time, pdh)
+            label.set_xy(pdlLabel, time, pdl)
+            label.set_textcolor(pdhLabel, showPDH ? pdColor : color.new(pdColor, 100))
+            label.set_textcolor(pdlLabel, showPDL ? pdColor : color.new(pdColor, 100))
+        line.set_color(pdhLine, showPDH ? pdColor : color.new(pdColor, 100))
+        line.set_color(pdlLine, showPDL ? pdColor : color.new(pdColor, 100))
+        label.set_textcolor(pdhLabel, showPDH ? pdColor : color.new(pdColor, 100))
+        label.set_textcolor(pdlLabel, showPDL ? pdColor : color.new(pdColor, 100))
+
+// ── PO3 candle drawing: keep and update four boxes/wicks rather than
+// deleting and recreating them on every chart update. ─────────────────────
+var box b0 = na
+var box b1 = na
+var box b2 = na
+var box b3 = na
+var line w0 = na
+var line w1 = na
+var line w2 = na
+var line w3 = na
+var line midTop = na
+var line midBottom = na
+var line midCandle = na
+var label tfLabel = na
+color c0 = currC >= currO ? bullColor : bearColor
+color c1 = prevC >= prevO ? bullColor : bearColor
+color c2 = prev2C >= prev2O ? bullColor : bearColor
+color c3 = prev3C >= prev3O ? bullColor : bearColor
+bool priorOutside = (prevH > prev2H and prevC < prev2H) or (prevL < prev2L and prevC > prev2L)
+color displayC1 = priorOutside ? outsideColor : c1
+float midpointTop = prevC >= prevO ? (prevH + prevC) * 0.5 : (prevH + prevO) * 0.5
+float midpointBottom = prevC >= prevO ? (prevL + prevO) * 0.5 : (prevL + prevC) * 0.5
+float midpointCandle = (prevH + prevL) * 0.5
+int x0l = bar_index + 13 + candleOffset
+int x0r = bar_index + 15 + candleOffset
+int x1l = bar_index + 10 + candleOffset
+int x1r = bar_index + 12 + candleOffset
+int x2l = bar_index + 7 + candleOffset
+int x2r = bar_index + 9 + candleOffset
+int x3l = bar_index + 4 + candleOffset
+int x3r = bar_index + 6 + candleOffset
+
+if barstate.islast
+    if validContextTf and not na(currO) and not na(prevO) and not na(prev2O) and not na(prev3O)
+        if na(b0)
+            b0 := box.new(x0l, math.max(currO, currC), x0r, math.min(currO, currC), bgcolor = c0, border_color = borderColor)
+            b1 := box.new(x1l, math.max(prevO, prevC), x1r, math.min(prevO, prevC), bgcolor = displayC1, border_color = borderColor)
+            b2 := box.new(x2l, math.max(prev2O, prev2C), x2r, math.min(prev2O, prev2C), bgcolor = c2, border_color = borderColor)
+            b3 := box.new(x3l, math.max(prev3O, prev3C), x3r, math.min(prev3O, prev3C), bgcolor = c3, border_color = borderColor)
+            w0 := line.new(int((x0l + x0r) / 2), currH, int((x0l + x0r) / 2), currL, color = borderColor)
+            w1 := line.new(int((x1l + x1r) / 2), prevH, int((x1l + x1r) / 2), prevL, color = borderColor)
+            w2 := line.new(int((x2l + x2r) / 2), prev2H, int((x2l + x2r) / 2), prev2L, color = borderColor)
+            w3 := line.new(int((x3l + x3r) / 2), prev3H, int((x3l + x3r) / 2), prev3L, color = borderColor)
+        else
+            box.set_lefttop(b0, x0l, math.max(currO, currC))
+            box.set_rightbottom(b0, x0r, math.min(currO, currC))
+            box.set_bgcolor(b0, c0)
+            box.set_lefttop(b1, x1l, math.max(prevO, prevC))
+            box.set_rightbottom(b1, x1r, math.min(prevO, prevC))
+            box.set_bgcolor(b1, displayC1)
+            box.set_lefttop(b2, x2l, math.max(prev2O, prev2C))
+            box.set_rightbottom(b2, x2r, math.min(prev2O, prev2C))
+            box.set_bgcolor(b2, c2)
+            box.set_lefttop(b3, x3l, math.max(prev3O, prev3C))
+            box.set_rightbottom(b3, x3r, math.min(prev3O, prev3C))
+            box.set_bgcolor(b3, c3)
+            line.set_xy1(w0, int((x0l + x0r) / 2), currH)
+            line.set_xy2(w0, int((x0l + x0r) / 2), currL)
+            line.set_xy1(w1, int((x1l + x1r) / 2), prevH)
+            line.set_xy2(w1, int((x1l + x1r) / 2), prevL)
+            line.set_xy1(w2, int((x2l + x2r) / 2), prev2H)
+            line.set_xy2(w2, int((x2l + x2r) / 2), prev2L)
+            line.set_xy1(w3, int((x3l + x3r) / 2), prev3H)
+            line.set_xy2(w3, int((x3l + x3r) / 2), prev3L)
+
+        int midStart = x1l - (input.bool(false, "Extend midpoint left", group = GROUP_CANDLE) ? 30 : 0)
+        if na(midTop)
+            midTop := line.new(midStart, midpointTop, x0r, midpointTop, color = midpointColor)
+            midBottom := line.new(midStart, midpointBottom, x0r, midpointBottom, color = midpointColor)
+            midCandle := line.new(midStart, midpointCandle, x0r, midpointCandle, color = color.red)
+        else
+            line.set_xy1(midTop, midStart, midpointTop)
+            line.set_xy2(midTop, x0r, midpointTop)
+            line.set_xy1(midBottom, midStart, midpointBottom)
+            line.set_xy2(midBottom, x0r, midpointBottom)
+            line.set_xy1(midCandle, midStart, midpointCandle)
+            line.set_xy2(midCandle, x0r, midpointCandle)
+        line.set_color(midTop, showTopMidpoint ? midpointColor : color.new(midpointColor, 100))
+        line.set_color(midBottom, showBottomMidpoint ? midpointColor : color.new(midpointColor, 100))
+        line.set_color(midCandle, showCandleMidpoint ? color.red : color.new(color.red, 100))
+
+        if showTfLabel
+            string statusText = "GxT · " + contextTf + (autoTf ? " · Auto" : " · Manual") + " · developing"
+            float labelY = math.max(currH, math.max(prevH, math.max(prev2H, prev3H)))
+            if na(tfLabel)
+                tfLabel := label.new(x0r, labelY, statusText, style = label.style_none, textcolor = color.gray, size = size.small)
+            else
+                label.set_xy(tfLabel, x0r, labelY)
+                label.set_text(tfLabel, statusText)
+        else if not na(tfLabel)
+            label.delete(tfLabel)
+            tfLabel := na
+
+// ── Period dividers ───────────────────────────────────────────────────────
+bool newContextPeriod = ta.change(time(requestTf)) != 0
+if barstate.isconfirmed and showDividers and validContextTf and newContextPeriod
+    line divider = line.new(bar_index, low, bar_index, high, xloc = xloc.bar_index, extend = extend.both, color = dividerColor, style = line.style_dashed)
+    array.push(timeframeDividers, divider)
+    while array.size(timeframeDividers) > dividerCount
+        line.delete(array.shift(timeframeDividers))
+
+// ── Next context-period close ─────────────────────────────────────────────
+int contextClose = validContextTf ? time_close(contextTf) : na
+if barstate.islast and showCloseReference and not na(contextClose)
+    if na(closeReference)
+        closeReference := line.new(contextClose, low, contextClose, high, xloc = xloc.bar_time, extend = extend.both, color = closeColor, width = 2)
+    else
+        line.set_xy1(closeReference, contextClose, low)
+        line.set_xy2(closeReference, contextClose, high)
+        line.set_color(closeReference, closeColor)
+else if barstate.islast and not na(closeReference)
+    line.delete(closeReference)
+    closeReference := na
+
+// No alerts. PDH/PDL are dotted horizontal levels from the previous daily
+// candle close, and PO3 drawings are context visualizations only.
