@@ -1,0 +1,212 @@
+//@version=6
+// GxT HTF candle context — visual reference aid, not a trading signal.
+// The current higher-timeframe candle is live/developing and can change until it closes.
+indicator("GxT PO3 Candle Context", shorttitle = "GxT PO3 Context", overlay = true, max_bars_back = 1000, max_lines_count = 100, max_boxes_count = 10, max_labels_count = 20)
+
+// ── Inputs ────────────────────────────────────────────────────────────────
+string GROUP_TIME = "Timeframe"
+string GROUP_CANDLES = "Candle context"
+string GROUP_WICKS = "Midpoint references"
+string GROUP_DIVIDERS = "Timeframe dividers"
+string GROUP_CLOSE = "Dynamic close reference"
+
+bool autoTimeframe = input.bool(true, "Auto-select higher timeframe", group = GROUP_TIME, tooltip = "Uses the GxT chart-to-context mapping. The current higher-timeframe candle remains developing until its close.")
+string manualTimeframe = input.timeframe("15", "Manual timeframe", options = ["5", "15", "30", "60", "240", "1D", "1W", "1M"], group = GROUP_TIME)
+int candleOffset = input.int(0, "Drawing offset", minval = -50, maxval = 50, group = GROUP_CANDLES)
+color bullishColor = input.color(color.green, "Bullish body", group = GROUP_CANDLES, inline = "body")
+color bearishColor = input.color(color.black, "Bearish body", group = GROUP_CANDLES, inline = "body")
+color outsideCloseColor = input.color(color.orange, "Outside-close context", group = GROUP_CANDLES)
+color candleBorderColor = input.color(color.black, "Body / wick border", group = GROUP_CANDLES)
+bool showTimeframeLabel = input.bool(true, "Show timeframe / status label", group = GROUP_CANDLES)
+
+color midpointColor = input.color(color.gray, "Midpoint reference color", group = GROUP_WICKS)
+bool extendMidpoints = input.bool(false, "Extend midpoint references left", group = GROUP_WICKS)
+bool showTopMidpoint = input.bool(true, "Show upper midpoint", group = GROUP_WICKS, inline = "mid")
+bool showBottomMidpoint = input.bool(true, "Show lower midpoint", group = GROUP_WICKS, inline = "mid")
+bool showCandleMidpoint = input.bool(false, "Show prior candle midpoint", group = GROUP_WICKS)
+
+bool showDividers = input.bool(true, "Show recent timeframe dividers", group = GROUP_DIVIDERS)
+int dividerHistory = input.int(4, "Divider count", minval = 1, maxval = 20, group = GROUP_DIVIDERS)
+color dividerColor = input.color(color.new(color.gray, 50), "Divider color", group = GROUP_DIVIDERS)
+
+bool showDynamicClose = input.bool(true, "Show next HTF close reference", group = GROUP_CLOSE)
+color dynamicCloseColor = input.color(color.new(color.white, 20), "Close reference color", group = GROUP_CLOSE)
+
+// ── Chart-to-context timeframe selection ─────────────────────────────────
+string chartTimeframe = timeframe.period
+string autoSelectedTimeframe = switch chartTimeframe
+    "1" => "15"
+    "3" => "30"
+    "5" => "60"
+    "15" => "240"
+    "60" => "1D"
+    "1D" => "1M"
+    "1W" => "1M"
+    => manualTimeframe
+string contextTimeframe = autoTimeframe ? autoSelectedTimeframe : manualTimeframe
+float chartSeconds = timeframe.in_seconds()
+float contextSeconds = timeframe.in_seconds(contextTimeframe)
+bool contextTimeframeValid = not na(chartSeconds) and not na(contextSeconds) and contextSeconds >= chartSeconds
+string requestTimeframe = contextTimeframeValid ? contextTimeframe : timeframe.period
+
+// Current candle is intentionally live. Prior candles are completed references.
+[currOpen, currHigh, currLow, currClose, prevOpen, prevHigh, prevLow, prevClose, prev2Open, prev2High, prev2Low, prev2Close, prev3Open, prev3High, prev3Low, prev3Close] = request.security(syminfo.tickerid, requestTimeframe, [open, high, low, close, open[1], high[1], low[1], close[1], open[2], high[2], low[2], close[2], open[3], high[3], low[3], close[3]], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+// ── Small persistent drawing set: update objects instead of recreating them ──
+var box currentBody = na
+var box previousBody = na
+var box previous2Body = na
+var box previous3Body = na
+var line currentWick = na
+var line previousWick = na
+var line previous2Wick = na
+var line previous3Wick = na
+var line topMidpointLine = na
+var line bottomMidpointLine = na
+var line candleMidpointLine = na
+var label contextLabel = na
+var line closeReference = na
+var array<line> timeframeDividers = array.new<line>()
+
+color currentBodyColor = currClose >= currOpen ? bullishColor : bearishColor
+color previousBodyColor = prevClose >= prevOpen ? bullishColor : bearishColor
+color previous2BodyColor = prev2Close >= prev2Open ? bullishColor : bearishColor
+color previous3BodyColor = prev3Close >= prev3Open ? bullishColor : bearishColor
+bool previousOutsideClose = (prevHigh > prev2High and prevClose < prev2High) or (prevLow < prev2Low and prevClose > prev2Low)
+color priorBodyDisplayColor = previousOutsideClose ? outsideCloseColor : previousBodyColor
+
+float upperMidpoint = prevClose >= prevOpen ? (prevHigh + prevClose) * 0.5 : (prevHigh + prevOpen) * 0.5
+float lowerMidpoint = prevClose >= prevOpen ? (prevLow + prevOpen) * 0.5 : (prevLow + prevClose) * 0.5
+float fullCandleMidpoint = (prevHigh + prevLow) * 0.5
+int leftCurrent = bar_index + 13 + candleOffset
+int rightCurrent = bar_index + 15 + candleOffset
+int leftPrevious = bar_index + 10 + candleOffset
+int rightPrevious = bar_index + 12 + candleOffset
+int leftPrevious2 = bar_index + 7 + candleOffset
+int rightPrevious2 = bar_index + 9 + candleOffset
+int leftPrevious3 = bar_index + 4 + candleOffset
+int rightPrevious3 = bar_index + 6 + candleOffset
+int leftMidpoint = bar_index + 10 + candleOffset - (extendMidpoints ? 30 : 0)
+int rightMidpoint = bar_index + 15 + candleOffset
+
+if barstate.islast
+    if contextTimeframeValid and not na(currOpen) and not na(prevOpen) and not na(prev2Open) and not na(prev3Open)
+        if na(currentBody)
+            currentBody := box.new(leftCurrent, math.max(currOpen, currClose), rightCurrent, math.min(currOpen, currClose), bgcolor = currentBodyColor, border_color = candleBorderColor)
+            previousBody := box.new(leftPrevious, math.max(prevOpen, prevClose), rightPrevious, math.min(prevOpen, prevClose), bgcolor = priorBodyDisplayColor, border_color = candleBorderColor)
+            previous2Body := box.new(leftPrevious2, math.max(prev2Open, prev2Close), rightPrevious2, math.min(prev2Open, prev2Close), bgcolor = previous2BodyColor, border_color = candleBorderColor)
+            previous3Body := box.new(leftPrevious3, math.max(prev3Open, prev3Close), rightPrevious3, math.min(prev3Open, prev3Close), bgcolor = previous3BodyColor, border_color = candleBorderColor)
+            currentWick := line.new(int((leftCurrent + rightCurrent) / 2), currHigh, int((leftCurrent + rightCurrent) / 2), currLow, color = candleBorderColor)
+            previousWick := line.new(int((leftPrevious + rightPrevious) / 2), prevHigh, int((leftPrevious + rightPrevious) / 2), prevLow, color = candleBorderColor)
+            previous2Wick := line.new(int((leftPrevious2 + rightPrevious2) / 2), prev2High, int((leftPrevious2 + rightPrevious2) / 2), prev2Low, color = candleBorderColor)
+            previous3Wick := line.new(int((leftPrevious3 + rightPrevious3) / 2), prev3High, int((leftPrevious3 + rightPrevious3) / 2), prev3Low, color = candleBorderColor)
+        else
+            box.set_lefttop(currentBody, leftCurrent, math.max(currOpen, currClose))
+            box.set_rightbottom(currentBody, rightCurrent, math.min(currOpen, currClose))
+            box.set_bgcolor(currentBody, currentBodyColor)
+            box.set_lefttop(previousBody, leftPrevious, math.max(prevOpen, prevClose))
+            box.set_rightbottom(previousBody, rightPrevious, math.min(prevOpen, prevClose))
+            box.set_bgcolor(previousBody, priorBodyDisplayColor)
+            box.set_lefttop(previous2Body, leftPrevious2, math.max(prev2Open, prev2Close))
+            box.set_rightbottom(previous2Body, rightPrevious2, math.min(prev2Open, prev2Close))
+            box.set_bgcolor(previous2Body, previous2BodyColor)
+            box.set_lefttop(previous3Body, leftPrevious3, math.max(prev3Open, prev3Close))
+            box.set_rightbottom(previous3Body, rightPrevious3, math.min(prev3Open, prev3Close))
+            box.set_bgcolor(previous3Body, previous3BodyColor)
+            line.set_xy1(currentWick, int((leftCurrent + rightCurrent) / 2), currHigh)
+            line.set_xy2(currentWick, int((leftCurrent + rightCurrent) / 2), currLow)
+            line.set_xy1(previousWick, int((leftPrevious + rightPrevious) / 2), prevHigh)
+            line.set_xy2(previousWick, int((leftPrevious + rightPrevious) / 2), prevLow)
+            line.set_xy1(previous2Wick, int((leftPrevious2 + rightPrevious2) / 2), prev2High)
+            line.set_xy2(previous2Wick, int((leftPrevious2 + rightPrevious2) / 2), prev2Low)
+            line.set_xy1(previous3Wick, int((leftPrevious3 + rightPrevious3) / 2), prev3High)
+            line.set_xy2(previous3Wick, int((leftPrevious3 + rightPrevious3) / 2), prev3Low)
+
+        if showTopMidpoint
+            if na(topMidpointLine)
+                topMidpointLine := line.new(leftMidpoint, upperMidpoint, rightMidpoint, upperMidpoint, color = midpointColor)
+            else
+                line.set_xy1(topMidpointLine, leftMidpoint, upperMidpoint)
+                line.set_xy2(topMidpointLine, rightMidpoint, upperMidpoint)
+        else if not na(topMidpointLine)
+            line.delete(topMidpointLine)
+            topMidpointLine := na
+
+        if showBottomMidpoint
+            if na(bottomMidpointLine)
+                bottomMidpointLine := line.new(leftMidpoint, lowerMidpoint, rightMidpoint, lowerMidpoint, color = midpointColor)
+            else
+                line.set_xy1(bottomMidpointLine, leftMidpoint, lowerMidpoint)
+                line.set_xy2(bottomMidpointLine, rightMidpoint, lowerMidpoint)
+        else if not na(bottomMidpointLine)
+            line.delete(bottomMidpointLine)
+            bottomMidpointLine := na
+
+        if showCandleMidpoint
+            if na(candleMidpointLine)
+                candleMidpointLine := line.new(leftMidpoint, fullCandleMidpoint, rightMidpoint, fullCandleMidpoint, color = color.red)
+            else
+                line.set_xy1(candleMidpointLine, leftMidpoint, fullCandleMidpoint)
+                line.set_xy2(candleMidpointLine, rightMidpoint, fullCandleMidpoint)
+        else if not na(candleMidpointLine)
+            line.delete(candleMidpointLine)
+            candleMidpointLine := na
+
+        if showTimeframeLabel
+            string autoSuffix = autoTimeframe ? " · Auto" : " · Manual"
+            string currentStatus = " · developing"
+            string labelText = "GxT · " + contextTimeframe + autoSuffix + currentStatus
+            float labelY = math.max(currHigh, math.max(prevHigh, math.max(prev2High, prev3High)))
+            if na(contextLabel)
+                contextLabel := label.new(rightCurrent, labelY, labelText, style = label.style_none, textcolor = color.gray, size = size.small)
+            else
+                label.set_xy(contextLabel, rightCurrent, labelY)
+                label.set_text(contextLabel, labelText)
+        else if not na(contextLabel)
+            label.delete(contextLabel)
+            contextLabel := na
+    else
+        if not na(contextLabel)
+            label.delete(contextLabel)
+            contextLabel := na
+        if not na(currentBody)
+            box.delete(currentBody)
+            box.delete(previousBody)
+            box.delete(previous2Body)
+            box.delete(previous3Body)
+            line.delete(currentWick)
+            line.delete(previousWick)
+            line.delete(previous2Wick)
+            line.delete(previous3Wick)
+            currentBody := na
+            previousBody := na
+            previous2Body := na
+            previous3Body := na
+            currentWick := na
+            previousWick := na
+            previous2Wick := na
+            previous3Wick := na
+
+// ── HTF boundary dividers: retain only the configured recent count ────────
+bool newContextPeriod = ta.change(time(requestTimeframe)) != 0
+if barstate.isconfirmed and showDividers and contextTimeframeValid and newContextPeriod
+    line divider = line.new(bar_index, low, bar_index, high, xloc = xloc.bar_index, extend = extend.both, color = dividerColor, style = line.style_dashed)
+    array.push(timeframeDividers, divider)
+    while array.size(timeframeDividers) > dividerHistory
+        line.delete(array.shift(timeframeDividers))
+
+// ── Dynamic higher-timeframe close reference ──────────────────────────────
+int contextCloseTime = contextTimeframeValid ? time_close(contextTimeframe) : na
+if barstate.islast and showDynamicClose and not na(contextCloseTime)
+    if na(closeReference)
+        closeReference := line.new(contextCloseTime, low, contextCloseTime, high, xloc = xloc.bar_time, extend = extend.both, color = dynamicCloseColor, style = line.style_solid, width = 2)
+    else
+        line.set_xy1(closeReference, contextCloseTime, low)
+        line.set_xy2(closeReference, contextCloseTime, high)
+        line.set_color(closeReference, dynamicCloseColor)
+else if barstate.islast and not na(closeReference)
+    line.delete(closeReference)
+    closeReference := na
+
+// No alertcondition() or alert() calls. The current HTF candle is intentionally
+// live and may repaint; prior HTF candles are completed historical context.
