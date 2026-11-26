@@ -1,769 +1,855 @@
 //@version=6
-indicator("ALCHEMIST ANALYZER V3.2", "ALCHEMIST V3.2", overlay = true,
-     max_lines_count = 300, max_labels_count = 300, max_boxes_count = 200)
+// ══════════════════════════════════════════════════════════════════════════
+//  GxT FRAMEWORK V3 — lapisan GxT di atas kerangka ICT
+//  Narasi → Framework → Eksekusi. Hanya ALAT BANTU visual: bukan sinyal, bukan logika trade.
+//  Deteksi mengikuti ICT_RULES.md: candle tertutup, swing ketat, tembus ≥ 1 tick,
+//  satu penanda per swing/level, data pembanding kosong ≠ "tidak ada divergensi".
+// ══════════════════════════════════════════════════════════════════════════
+indicator("GxT Framework V3", shorttitle = "GxT FW V3", overlay = true, max_bars_back = 5000, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
 
-//====================================================================
-// ALCHEMIST ANALYZER V3.2  (fokus Time & Price, GxT Sequence, tanpa SMT)
-// Alat analisa saja. Tidak ada buy/sell. Alert hanya untuk inversi IFVG.
-//====================================================================
+// ▼▼▼ BEGIN GXT V3 LAYER ▼▼▼  (jika digabung ke V2.0: tempel mulai baris ini, tanpa 2 baris header di atas)
 
-// ------------------------------ INPUT ------------------------------
-string G1  = "01 · HTF LEVELS"
-string G2  = "02 · STRUCTURE"
-string G3  = "03 · LIQUIDITY"
-string G4  = "04 · DEALING RANGE"
-string G5  = "05 · KILL ZONE (GxT)"
-string G6  = "06 · TIME · MACRO & SILVER BULLET (NY)"
-string G7  = "07 · TAMPILAN & SEQUENCE"
-string G8  = "08 · OPENING PRICES"
-string G9  = "09 · PO3"
-string G10 = "10 · FVG / IFVG"
+// ─── 1. INPUT ────────────────────────────────────────────────────────────
+string G_GEN = "GxT V3 | Umum"
+string G_STR = "GxT V3 | Struktur · IRL/ERL · C2/C3"
+string G_DSP = "GxT V3 | Displacement (untuk MSS)"
+string G_LVL = "GxT V3 | ERL: PDH/PDL · PWH/PWL · IPDA"
+string G_SES = "GxT V3 | Sesi / Killzone"
+string G_DQT = "GxT V3 | Siklus Waktu DQT"
+string G_OPN = "GxT V3 | Opening Price"
+string G_SMT = "GxT V3 | SMT · PSP"
+string G_PNL = "GxT V3 | Panel Narasi"
 
-string htf1   = input.timeframe("60",  "HTF 1", group = G1)
-string htf2   = input.timeframe("240", "HTF 2", group = G1)
-bool showPDH  = input.bool(true,  "PDH / PDL", group = G1)
-bool showPWH  = input.bool(true,  "PWH / PWL", group = G1)
-bool showOCL2 = input.bool(true,  "OCL HTF 2 (Open/Close candle sebelumnya)", group = G1)
-bool showOCL1 = input.bool(false, "OCL HTF 1", group = G1)
-int  lineExt  = input.int(8, "Panjang garis ke kanan (bar)", minval = 2, maxval = 40, group = G1)
+gx3_tz     = input.string("America/New_York", "Zona waktu acuan", group = G_GEN, tooltip = "Siklus DQT, sesi, dan opening price memakai zona ini (EST/EDT otomatis).")
+gx3_anchor = input.string("18:00", "Awal siklus harian", options = ["18:00", "00:00"], group = G_GEN, tooltip = "18:00 NY = pembukaan hari futures (Q1 Akumulasi → Q4). 00:00 NY = True Day Open. Dipakai juga oleh profil hari OHLC/OLHC.")
 
-int  pivotLen = input.int(5, "Pivot Length (struktur)", minval = 2, maxval = 20, group = G2)
-int  htfPivot = input.int(3, "Pivot Length (bias HTF)", minval = 1, maxval = 10, group = G2)
-bool showBOS  = input.bool(true,  "BOS / MSS", group = G2)
-bool showSwing = input.bool(false, "Label HH / HL / LH / LL", group = G2)
-int  maxMarks = input.int(20, "Maks. tanda di chart (BOS/MSS/EQ/Sweep)", minval = 4, maxval = 60, group = G2)
+gx3_len      = input.int(5, "Kekuatan swing (kiri = kanan)", minval = 2, maxval = 20, group = G_STR, tooltip = "Default ICT_RULES = 5. Swing ketat: high/low harus benar-benar lebih tinggi/rendah dari semua candle di kedua sisi; baru sah setelah candle sisi kanan ke-N tertutup.")
+gx3_show_sw  = input.bool(false, "Penanda swing terkonfirmasi", group = G_STR)
+gx3_show_irl = input.bool(true, "IRL terbaru (swing high ↔ swing low)", group = G_STR)
+gx3_show_eq  = input.bool(true, "Equilibrium IRL (50%)", group = G_STR)
+gx3_show_mss = input.bool(true, "MSS: displacement menembus swing melawan trend", group = G_STR)
+gx3_show_bos = input.bool(false, "BOS: tembus swing searah trend", group = G_STR)
+gx3_show_c2  = input.bool(true, "C2: sweep swing + close kembali ke dalam", group = G_STR)
+gx3_show_c3  = input.bool(true, "C3: swing valid setelah C2", group = G_STR)
+gx3_c3_win   = input.int(30, "Jendela C3 (bar)", minval = 5, maxval = 200, group = G_STR)
+gx3_keep_mk  = input.int(4, "Penanda terakhir yang ditampilkan", minval = 1, maxval = 20, group = G_STR)
+gx3_col_h    = input.color(color.rgb(213, 92, 92), "Swing High / BSL", group = G_STR, inline = "swc")
+gx3_col_l    = input.color(color.rgb(60, 150, 130), "Swing Low / SSL", group = G_STR, inline = "swc")
+gx3_col_irl  = input.color(color.new(color.rgb(105, 130, 175), 88), "Isi IRL", group = G_STR, inline = "irc")
+gx3_col_eq   = input.color(color.rgb(190, 145, 65), "EQ", group = G_STR, inline = "irc")
+gx3_col_mss  = input.color(color.rgb(205, 130, 40), "MSS", group = G_STR, inline = "msc")
+gx3_col_bos  = input.color(color.rgb(110, 120, 140), "BOS", group = G_STR, inline = "msc")
 
-bool  showEQ     = input.bool(true, "EQH / EQL", group = G3)
-float eqTol      = input.float(0.10, "Toleransi EQ × ATR", minval = 0.01, maxval = 1.0, step = 0.01, group = G3)
-bool  showSweeps = input.bool(true, "Liquidity Sweep (swing, PDH, PDL)", group = G3)
-int   sessRevWin = input.int(48, "Reversal: jendela sapuan high/low sesi (bar)", minval = 6, maxval = 300, group = G3)
+gx3_d_len  = input.int(20, "Baseline (candle sebelumnya)", minval = 5, group = G_DSP)
+gx3_d_mult = input.float(1.5, "Kelipatan body rata-rata", minval = 0.5, step = 0.1, group = G_DSP)
+gx3_d_frac = input.float(0.6, "Body minimum / range candle", minval = 0.1, maxval = 1.0, step = 0.05, group = G_DSP)
 
-bool showPD  = input.bool(true, "Premium / Discount + EQ 50%", group = G4)
-bool showOTE = input.bool(true, "OTE 0.62–0.79 (ideal 0.705)", group = G4)
+gx3_lv_on  = input.bool(true, "Tampilkan level ERL", group = G_LVL)
+gx3_pd_on  = input.bool(true, "PDH / PDL", group = G_LVL, inline = "pd")
+gx3_pd_col = input.color(color.rgb(86, 128, 190), "", group = G_LVL, inline = "pd")
+gx3_pw_on  = input.bool(false, "PWH / PWL", group = G_LVL, inline = "pw")
+gx3_pw_col = input.color(color.rgb(130, 98, 170), "", group = G_LVL, inline = "pw")
+gx3_ip_sel = input.string("Off", "IPDA (high/low N hari)", options = ["Off", "20", "40", "60", "Semua"], group = G_LVL, tooltip = "Rentang data IPDA: high/low 20/40/60 hari perdagangan terakhir yang sudah selesai.")
+gx3_ip_col = input.color(color.rgb(170, 120, 60), "Warna IPDA", group = G_LVL)
+gx3_lv_sty = input.string("Solid", "Gaya garis level", options = ["Solid", "Dashed", "Dotted"], group = G_LVL)
 
-bool   showSess = input.bool(true, "Tampilkan Kill Zone", group = G5)
-string sessTZ   = input.string("Asia/Jakarta", "Timezone", options = ["Asia/Jakarta", "Etc/UTC", "Europe/London", "America/New_York"], group = G5)
-string asiaS    = input.session("0700-1200", "Asia KZ", group = G5)
-string londonS  = input.session("1400-1900", "London KZ", group = G5)
-string nyS      = input.session("1900-0000", "New York KZ", group = G5)
-int    maxSess  = input.int(4, "Maks. kotak per sesi", minval = 1, maxval = 10, group = G5)
+gx3_ss_on  = input.bool(true, "Tampilkan sesi", group = G_SES)
+gx3_ss_box = input.bool(true, "Kotak rentang sesi", group = G_SES)
+gx3_ss_tf  = input.timeframe("240", "Sembunyikan jika TF chart ≥", group = G_SES)
+gx3_ss_tr  = input.int(92, "Transparansi kotak", minval = 60, maxval = 99, group = G_SES)
+gx3_as_on  = input.bool(true, "Asia", group = G_SES, inline = "as")
+gx3_as_se  = input.session("2000-0000", "", group = G_SES, inline = "as")
+gx3_as_co  = input.color(color.rgb(238, 181, 107), "", group = G_SES, inline = "as")
+gx3_lo_on  = input.bool(true, "London", group = G_SES, inline = "lo")
+gx3_lo_se  = input.session("0200-0500", "", group = G_SES, inline = "lo")
+gx3_lo_co  = input.color(color.rgb(110, 90, 160), "", group = G_SES, inline = "lo")
+gx3_ny_on  = input.bool(true, "New York", group = G_SES, inline = "ny")
+gx3_ny_se  = input.session("0930-1100", "", group = G_SES, inline = "ny")
+gx3_ny_co  = input.color(color.rgb(11, 120, 102), "", group = G_SES, inline = "ny")
 
-bool   showICTMacro = input.bool(true, "ICT Macros (07:50–08:10 dst.)", group = G6)
-bool   showSBMacro  = input.bool(true, "Macro SB (xx:20–xx:40 & xx:50–xx:10, di dalam jendela SB)", group = G6)
-bool   showSBBox    = input.bool(true, "Kotak jendela Silver Bullet", group = G6)
-bool   showKeyTimes = input.bool(true, "Garis open xx:15 & xx:45 (di dalam SB)", group = G6)
-string sbLdnS = input.session("0300-0400", "SB London (waktu NY)", group = G6)
-string sbPreS = input.session("0700-0830", "SB NY Premarket (waktu NY)", group = G6)
-string sbAmS  = input.session("1000-1100", "SB NY AM (waktu NY)", group = G6)
-string sbPmS  = input.session("1400-1500", "SB NY PM (waktu NY)", group = G6)
-string sbFinS = input.session("1500-1600", "SB PM Finish (waktu NY)", group = G6)
-color  colMacro = input.color(#9c27b0, "Warna macro / SB", group = G6)
+gx3_q_on    = input.bool(true, "Kotak kuartal harian (6 jam)", group = G_DQT)
+gx3_q_tag   = input.bool(true, "Tag kuartal: A · M · D · C/R", group = G_DQT, tooltip = "Q1 Akumulasi · Q2 Manipulasi · Q3 Distribusi · Q4 Lanjutan/Reversal (hanya bermakna untuk awal siklus 18:00).")
+gx3_9_on    = input.bool(false, "Kotak 90 menit", group = G_DQT)
+gx3_m_on    = input.bool(false, "Kotak mikro 22,5 menit", group = G_DQT)
+gx3_q_keep  = input.int(4, "Siklus harian yang disimpan", minval = 1, maxval = 10, group = G_DQT)
+gx3_sub_keep = input.int(8, "Maks. kotak 90 menit / mikro", minval = 2, maxval = 48, group = G_DQT)
+gx3_q_tr    = input.int(91, "Transparansi harian", minval = 70, maxval = 99, group = G_DQT)
+gx3_9_tr    = input.int(96, "Transparansi 90 menit", minval = 80, maxval = 99, group = G_DQT)
+gx3_m_tr    = input.int(98, "Transparansi mikro", minval = 85, maxval = 100, group = G_DQT)
 
-bool   showDash = input.bool(true, "Dashboard", group = G7)
-string dashPos  = input.string("Top Right", "Posisi dashboard", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = G7)
-color  colBull  = input.color(#089981, "Warna bullish", group = G7)
-color  colBear  = input.color(#f23645, "Warna bearish", group = G7)
-color  colLvl   = input.color(#787b86, "Warna level", group = G7)
-float  seqExp   = input.float(1.0, "Candle D1 ekspansi: body × ATR D1", minval = 0.3, maxval = 3.0, step = 0.1, group = G7)
+gx3_op_on   = input.bool(true, "Tampilkan opening price", group = G_OPN, tooltip = "Harga open diambil dari data 1 menit, jadi tepat di jam yang dipilih pada TF chart berapa pun (intraday).")
+gx3_op_keep = input.int(1, "Riwayat per level", minval = 1, maxval = 10, group = G_OPN)
+gx3_o1_on = input.bool(true, "1", group = G_OPN, inline = "o1")
+gx3_o1_h  = input.int(18, "", minval = 0, maxval = 23, group = G_OPN, inline = "o1")
+gx3_o1_m  = input.int(0, ":", minval = 0, maxval = 59, group = G_OPN, inline = "o1")
+gx3_o1_c  = input.color(color.rgb(120, 130, 150), "", group = G_OPN, inline = "o1")
+gx3_o2_on = input.bool(true, "2", group = G_OPN, inline = "o2")
+gx3_o2_h  = input.int(22, "", minval = 0, maxval = 23, group = G_OPN, inline = "o2")
+gx3_o2_m  = input.int(0, ":", minval = 0, maxval = 59, group = G_OPN, inline = "o2")
+gx3_o2_c  = input.color(color.rgb(150, 120, 170), "", group = G_OPN, inline = "o2")
+gx3_o3_on = input.bool(true, "3", group = G_OPN, inline = "o3")
+gx3_o3_h  = input.int(0, "", minval = 0, maxval = 23, group = G_OPN, inline = "o3")
+gx3_o3_m  = input.int(0, ":", minval = 0, maxval = 59, group = G_OPN, inline = "o3")
+gx3_o3_c  = input.color(color.rgb(112, 65, 175), "", group = G_OPN, inline = "o3")
+gx3_o4_on = input.bool(true, "4", group = G_OPN, inline = "o4")
+gx3_o4_h  = input.int(0, "", minval = 0, maxval = 23, group = G_OPN, inline = "o4")
+gx3_o4_m  = input.int(30, ":", minval = 0, maxval = 59, group = G_OPN, inline = "o4")
+gx3_o4_c  = input.color(color.rgb(190, 110, 150), "", group = G_OPN, inline = "o4")
+gx3_o5_on = input.bool(false, "5", group = G_OPN, inline = "o5")
+gx3_o5_h  = input.int(8, "", minval = 0, maxval = 23, group = G_OPN, inline = "o5")
+gx3_o5_m  = input.int(30, ":", minval = 0, maxval = 59, group = G_OPN, inline = "o5")
+gx3_o5_c  = input.color(color.rgb(190, 90, 105), "", group = G_OPN, inline = "o5")
+gx3_o6_on = input.bool(true, "6", group = G_OPN, inline = "o6")
+gx3_o6_h  = input.int(9, "", minval = 0, maxval = 23, group = G_OPN, inline = "o6")
+gx3_o6_m  = input.int(30, ":", minval = 0, maxval = 59, group = G_OPN, inline = "o6")
+gx3_o6_c  = input.color(color.rgb(255, 125, 35), "", group = G_OPN, inline = "o6")
+gx3_ow_on = input.bool(true, "Weekly Open", group = G_OPN, inline = "ow")
+gx3_ow_c  = input.color(color.rgb(60, 60, 60), "", group = G_OPN, inline = "ow")
+gx3_om_on = input.bool(false, "Monthly Open", group = G_OPN, inline = "om")
+gx3_om_c  = input.color(color.rgb(30, 30, 30), "", group = G_OPN, inline = "om")
 
-bool   showDO  = input.bool(true,  "Daily Open", group = G8)
-bool   showWO  = input.bool(true,  "Weekly Open", group = G8)
-bool   showMO  = input.bool(false, "Monthly Open", group = G8)
-bool   showH2O = input.bool(true,  "HTF 2 Open (candle berjalan)", group = G8)
-bool   showTimeOpens = input.bool(true, "Waktu open custom (hanya TF ≤ 1H)", group = G8)
-string openTZ  = input.string("America/New_York", "Timezone waktu open", options = ["America/New_York", "Asia/Jakarta", "Etc/UTC", "Europe/London"], group = G8)
-string openList = input.text_area("0000,00:00\n0030,00:30\n1800,18:00\n2200,22:00", "Daftar waktu: HHmm,Label (satu per baris, maks. 8)", group = G8)
-color  colOpen = input.color(#f5a623, "Warna garis open", group = G8)
+gx3_smt_on    = input.bool(true, "SMT divergence", group = G_SMT, tooltip = "Primer memperluas swing ≥ 1 tick sementara pembanding berkorelasi tidak mengikuti (ICT_RULES). Tanda IRL/ERL: ERL bila swing baru menembus level eksternal yang belum ditembus swing sebelumnya.")
+gx3_psp_on    = input.bool(true, "PSP: warna candle primer ≠ pembanding", group = G_SMT)
+gx3_psp_ctx   = input.bool(true, "PSP hanya saat ada sweep level/swing", group = G_SMT)
+gx3_pair_mode = input.string("Auto", "Pasangan", options = ["Auto", "Manual"], group = G_SMT, tooltip = "Auto: pasangan umum (emas/perak/DXY, indeks, EUR/GBP, BTC/ETH). Jika simbol tidak ditemukan di broker Anda, pakai Manual.")
+gx3_m1        = input.symbol("CME_MINI:NQ1!", "Pembanding 1", group = G_SMT, inline = "m1")
+gx3_m1i       = input.bool(false, "Inverse", group = G_SMT, inline = "m1")
+gx3_m2_on     = input.bool(true, "Pembanding 2", group = G_SMT, inline = "m2")
+gx3_m2        = input.symbol("TVC:DXY", "", group = G_SMT, inline = "m2")
+gx3_m2i       = input.bool(true, "Inverse", group = G_SMT, inline = "m2")
+gx3_smt_col   = input.color(color.rgb(150, 92, 172), "Warna SMT / PSP", group = G_SMT)
 
-bool   showPO3    = input.bool(true, "Tampilkan PO3 Candles", group = G9)
-bool   po3Auto    = input.bool(true, "Timeframe PO3 otomatis", group = G9)
-string po3Manual  = input.string("60", "Timeframe PO3 manual", options = ["15", "30", "60", "240", "D", "W", "M"], group = G9)
-int    po3Offset  = input.int(18, "Jarak candle PO3 dari bar terakhir", minval = 0, maxval = 100, group = G9)
-float  po3Thr     = input.float(0.15, "Ambang Judas (× ATR HTF)", minval = 0.01, maxval = 2.0, step = 0.01, group = G9)
-bool   showMidWick = input.bool(true,  "0.5 wick candle sebelumnya", group = G9)
-bool   projMidWick = input.bool(true,  "Proyeksikan 0.5 wick ke chart", group = G9)
-bool   showCE      = input.bool(false, "CE 50% candle sebelumnya", group = G9)
-bool   showCount   = input.bool(true,  "Garis + hitung mundur close candle HTF", group = G9)
+gx3_pn_on  = input.bool(false, "Tampilkan Panel Narasi", group = G_PNL, tooltip = "Ringkasan fakta: waktu DQT, profil hari, struktur, IRL, IPDA, ERL terdekat, sweep terakhir. Deskriptif — bukan rekomendasi.")
+gx3_pn_pos = input.string("Bottom Right", "Posisi", options = ["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group = G_PNL)
+gx3_pn_sz  = input.string("Small", "Ukuran teks", options = ["Tiny", "Small", "Normal"], group = G_PNL)
+gx3_pn_tx  = input.color(color.rgb(35, 45, 60), "Teks", group = G_PNL, inline = "pnc")
+gx3_pn_bg  = input.color(color.new(color.white, 8), "Latar", group = G_PNL, inline = "pnc")
 
-bool  showFVG  = input.bool(true, "FVG aktif", group = G10)
-bool  showIFVG = input.bool(true, "IFVG (FVG yang di-inversi)", group = G10)
-float fvgMin   = input.float(0.15, "Ukuran minimum gap × ATR", minval = 0.01, maxval = 2.0, step = 0.01, group = G10)
-float dispMin  = input.float(0.8, "Displacement: body candle penembus × ATR", minval = 0.1, maxval = 3.0, step = 0.1, group = G10)
-int   maxFVG   = input.int(6, "Maks. zona FVG/IFVG", minval = 2, maxval = 20, group = G10)
-int   sweepWin = input.int(30, "Jendela sweep sebelum inversi (bar)", minval = 5, maxval = 100, group = G10)
+// ─── 2. TIPE & UTILITAS ──────────────────────────────────────────────────
+type Gx3Lvl
+    string name
+    float  px      = na
+    bool   swept   = false
+    bool   is_high = true
+    line   ln      = na
+    label  lb      = na
 
-// ----------------------------- FUNGSI ------------------------------
-f_trend(int len) =>
-    float ph = ta.pivothigh(high, len, len)
-    float pl = ta.pivotlow(low, len, len)
-    var float hA = na
-    var float hB = na
-    var float lA = na
-    var float lB = na
-    if not na(ph)
-        hB := hA
-        hA := ph
-    if not na(pl)
-        lB := lA
-        lA := pl
-    int t = 0
-    if not na(hB) and not na(lB)
-        if hA > hB and lA > lB
-            t := 1
-        else if hA < hB and lA < lB
-            t := -1
-    t
+type Gx3Sess
+    Gx3Lvl lh
+    Gx3Lvl ll
+    box    bx     = na
+    float  hi     = na
+    float  lo     = na
+    int    hi_t   = na
+    int    lo_t   = na
+    bool   was_in = false
 
-f_txt(int t) => t == 1 ? "BULLISH" : t == -1 ? "BEARISH" : "MIXED"
+type Gx3Blk
+    array<box>   arr
+    array<label> tags
+    box          act  = na
+    label        tg   = na
+    int          left = na
+    float        top  = na
+    float        bot  = na
 
-f_tf(string tf) =>
-    int s = timeframe.in_seconds(tf)
-    s >= 2592000 ? "M" : s >= 604800 ? "W" : s >= 86400 ? "D" : s >= 3600 ? str.tostring(s / 3600, "#") + "H" : str.tostring(s / 60, "#") + "m"
+type Gx3Slot
+    array<line> lns
+    label       lb = na
 
-f_pos(string s) =>
-    switch s
-        "Top Left"     => position.top_left
-        "Bottom Right" => position.bottom_right
-        "Bottom Left"  => position.bottom_left
-        => position.top_right
+gx3_style(string s) =>
+    s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
 
-f_in(string s, string tz) => not na(time(timeframe.period, s, tz))
+gx3_hhmm(int t) =>
+    str.format_time(t, "HH:mm", gx3_tz)
 
-f_mark(int x1, float y1, int x2, float y2, string txt, color c, string sty,
-     int lx, float ly, string lst, array<line> la, array<label> lb, int maxN) =>
-    line l = line.new(x1, y1, x2, y2, color = c, style = sty, width = 1)
-    label b = label.new(lx, ly, txt, style = lst, color = color.new(chart.bg_color, 100), textcolor = c, size = size.tiny)
-    array.push(la, l)
-    array.push(lb, b)
-    if array.size(la) > maxN
-        line.delete(array.shift(la))
-        label.delete(array.shift(lb))
-    true
+gx3_clean(string s) =>
+    array<string> p = str.split(s, ":")
+    array.size(p) > 1 ? array.get(p, array.size(p) - 1) : s
 
-f_tag(int x, float y, string txt, color c, string lst, array<label> arr, int maxN) =>
-    label b = label.new(x, y, txt, style = lst, color = color.new(chart.bg_color, 100), textcolor = c, size = size.tiny)
-    array.push(arr, b)
-    if array.size(arr) > maxN
-        label.delete(array.shift(arr))
-    true
+gx3_op_txt(int h, int m) =>
+    (h < 10 ? "0" : "") + str.tostring(h) + ":" + (m < 10 ? "0" : "") + str.tostring(m) + (h == 0 and m == 0 ? " TDO" : "")
 
-f_lbl(int x, float y, string txt, color c, string lst, array<label> arr) =>
-    array.push(arr, label.new(x, y, txt, style = lst, color = color.new(chart.bg_color, 100), textcolor = c, size = size.tiny))
-    true
+gx3_tpos(string p) =>
+    p == "Top Left" ? position.top_left : p == "Top Right" ? position.top_right : p == "Bottom Left" ? position.bottom_left : position.bottom_right
 
-f_level(float price, int startIdx, string txt, color c, string sty,
-     array<line> la, array<label> lb, int ext) =>
-    if not na(price)
-        int x1 = math.max(startIdx, bar_index - 4500)
-        line l = line.new(x1, price, bar_index + ext, price, color = c, style = sty, width = 1)
-        label b = label.new(bar_index + ext, price, txt + "  " + str.tostring(price, format.mintick),
-             style = label.style_label_left, color = color.new(chart.bg_color, 100), textcolor = c, size = size.tiny)
-        array.push(la, l)
-        array.push(lb, b)
-    true
+gx3_trim_l(array<line> a, int keep) =>
+    while array.size(a) > keep
+        line.delete(array.shift(a))
 
-// kotak sesi (kill zone / jendela SB)
-f_session(string sess, string tz, string name, color col, int fillA, string bsty, bool show, int maxN, array<box> boxes) =>
-    bool act = not na(time(timeframe.period, sess, tz))
-    var float hi = na
-    var float lo = na
-    var box bx = na
-    if show and act and not act[1]
-        hi := high
-        lo := low
-        bx := box.new(bar_index, high, bar_index, low, border_color = color.new(col, 55),
-             bgcolor = color.new(col, fillA), border_width = 1, border_style = bsty, text = name,
-             text_size = size.tiny, text_color = color.new(col, 25),
-             text_halign = text.align_left, text_valign = text.align_top)
-        array.push(boxes, bx)
-        if array.size(boxes) > maxN
-            box.delete(array.shift(boxes))
-    else if act and not na(bx)
-        hi := math.max(hi, high)
-        lo := math.min(lo, low)
-        box.set_top(bx, hi)
-        box.set_bottom(bx, lo)
-        box.set_right(bx, bar_index)
-    act
+gx3_trim_b(array<label> a, int keep) =>
+    while array.size(a) > keep
+        label.delete(array.shift(a))
 
-// high/low sesi terakhir yang sudah selesai (selama sesi berjalan = sesi sebelumnya)
-f_sessRef(string sess, string tz) =>
-    bool act = not na(time(timeframe.period, sess, tz))
-    var float hi = na
-    var float lo = na
-    var float pHi = na
-    var float pLo = na
-    if act and not act[1]
-        pHi := hi
-        pLo := lo
-        hi := high
-        lo := low
-    else if act
-        hi := math.max(hi, high)
-        lo := math.min(lo, low)
-    [act ? pHi : hi, act ? pLo : lo]
+// Swing ketat: pivot harus LEBIH tinggi/rendah dari seluruh candle di kiri dan kanan (high/low sama = bukan swing).
+gx3_pivot_high(int n) =>
+    float c = high[n]
+    bool ok = not na(c)
+    for i = 0 to n - 1
+        if not (c > high[i])
+            ok := false
+    for j = n + 1 to 2 * n
+        if not (c > high[j])
+            ok := false
+    ok ? c : na
 
-f_candle(int x0, float o, float h, float l, float c, color body, color brd, array<box> bxs, array<line> lns) =>
-    array.push(bxs, box.new(x0, math.max(o, c), x0 + 2, math.min(o, c), border_color = brd, bgcolor = body))
-    array.push(lns, line.new(x0 + 1, h, x0 + 1, l, color = brd, width = 1))
-    true
+gx3_pivot_low(int n) =>
+    float c = low[n]
+    bool ok = not na(c)
+    for i = 0 to n - 1
+        if not (c < low[i])
+            ok := false
+    for j = n + 1 to 2 * n
+        if not (c < low[j])
+            ok := false
+    ok ? c : na
 
-// 0 akumulasi | 1 bull (Judas turun lalu naik) | 2 bear (Judas naik lalu turun) | 3 dist naik | 4 dist turun
-f_po3(float o, float h, float l, float c, float thr) =>
-    float up = h - o
-    float dn = o - l
-    int r = 0
-    if up > thr or dn > thr
-        if dn > thr and c > o
-            r := 1
-        else if up > thr and c < o
-            r := 2
-        else if c > o
-            r := 3
+// Level ERL: dibuat ulang saat periode baru, dipanjangkan sampai ditembus ≥ 1 tick (hanya candle tertutup).
+gx3_lvl_set(Gx3Lvl l, float price, int t0, bool is_high, color c, string sty, bool show) =>
+    if not na(l.ln)
+        line.delete(l.ln)
+    if not na(l.lb)
+        label.delete(l.lb)
+    l.px := price
+    l.is_high := is_high
+    l.swept := false
+    l.ln := na
+    l.lb := na
+    if show and not na(price)
+        l.ln := line.new(t0, price, time, price, xloc = xloc.bar_time, color = c, style = gx3_style(sty), width = 1)
+        l.lb := label.new(time, price, l.name, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(c, 100), textcolor = c, size = size.small)
+
+gx3_lvl_tick(Gx3Lvl l) =>
+    bool fresh = false
+    if not na(l.ln) and not na(l.px) and not l.swept
+        line.set_x2(l.ln, time)
+        label.set_x(l.lb, time)
+        bool hit = l.is_high ? high >= l.px + syminfo.mintick : low <= l.px - syminfo.mintick
+        if hit and barstate.isconfirmed
+            l.swept := true
+            fresh := true
+            line.set_color(l.ln, color.new(color.gray, 30))
+            line.set_style(l.ln, line.style_dotted)
+            label.set_text(l.lb, l.name + " ✕")
+            label.set_textcolor(l.lb, color.gray)
+    fresh
+
+// Sesi: kotak untuk sesi yang berjalan; level H/L dibuat HANYA untuk sesi yang sudah selesai (sesi yang masih terbentuk dikecualikan).
+gx3_sess_run(Gx3Sess s, bool on, string sess, color c) =>
+    bool in_s = on and not na(time(timeframe.period, sess, gx3_tz))
+    if in_s and not s.was_in
+        s.hi := high
+        s.lo := low
+        s.hi_t := time
+        s.lo_t := time
+        if gx3_ss_box
+            if not na(s.bx)
+                box.delete(s.bx)
+            s.bx := box.new(time, high, time, low, xloc = xloc.bar_time, bgcolor = color.new(c, gx3_ss_tr), border_color = color.new(c, 100))
+    else if in_s
+        if high > s.hi
+            s.hi := high
+            s.hi_t := time
+        if low < s.lo
+            s.lo := low
+            s.lo_t := time
+        if gx3_ss_box and not na(s.bx)
+            box.set_right(s.bx, time)
+            box.set_top(s.bx, s.hi)
+            box.set_bottom(s.bx, s.lo)
+    if s.was_in and not in_s
+        gx3_lvl_set(s.lh, s.hi, s.hi_t, true, c, gx3_lv_sty, gx3_lv_on)
+        gx3_lvl_set(s.ll, s.lo, s.lo_t, false, c, gx3_lv_sty, gx3_lv_on)
+    s.was_in := in_s
+
+// Kotak siklus waktu (kuartal harian / 90 menit / mikro) — tumbuh hanya mengikuti candle di dalam bloknya.
+gx3_blk_run(Gx3Blk k, bool on, int sz, color c, int trn, int keep, bool tag, string txt, int cyc, int el) =>
+    if on
+        int left = cyc + int(math.floor(el / sz)) * sz
+        if na(k.act) or left != k.left
+            k.left := left
+            k.top := high
+            k.bot := low
+            k.act := box.new(left, high, left + sz, low, xloc = xloc.bar_time, bgcolor = color.new(c, trn), border_color = color.new(c, 100))
+            array.push(k.arr, k.act)
+            while array.size(k.arr) > keep
+                box.delete(array.shift(k.arr))
+            if tag
+                k.tg := label.new(left, high, txt, xloc = xloc.bar_time, style = label.style_label_down, color = color.new(c, 100), textcolor = color.rgb(105, 115, 130), size = size.tiny)
+                array.push(k.tags, k.tg)
+                while array.size(k.tags) > keep
+                    label.delete(array.shift(k.tags))
         else
-            r := 4
+            k.top := math.max(k.top, high)
+            k.bot := math.min(k.bot, low)
+            box.set_top(k.act, k.top)
+            box.set_bottom(k.act, k.bot)
+            if not na(k.tg)
+                label.set_y(k.tg, k.top)
+
+// Opening price per jam-menit (dibaca dari data 1 menit; toleransi 15 menit bila menit tepat tidak ada bar).
+gx3_open_at(int hh, int mm) =>
+    var float o = na
+    var int t = na
+    var int done_key = na
+    int tgt = hh * 60 + mm
+    int cur = hour(time, gx3_tz) * 60 + minute(time, gx3_tz)
+    int key = year(time, gx3_tz) * 10000 + month(time, gx3_tz) * 100 + dayofmonth(time, gx3_tz)
+    if cur >= tgt and cur < tgt + 15 and key != done_key
+        o := open
+        t := time
+        done_key := key
+    [o, t]
+
+gx3_slot_run(Gx3Slot s, bool on, float o, int t, int keep, color c, string txt) =>
+    if on
+        int n = array.size(s.lns)
+        if not na(t) and not na(o) and (n == 0 or line.get_x1(array.get(s.lns, n - 1)) != t)
+            if n > 0
+                line.set_x2(array.get(s.lns, n - 1), t)
+            array.push(s.lns, line.new(t, o, int(math.max(time, t)), o, xloc = xloc.bar_time, color = c, style = line.style_dotted, width = 1))
+            while array.size(s.lns) > keep
+                line.delete(array.shift(s.lns))
+            if not na(s.lb)
+                label.delete(s.lb)
+            s.lb := label.new(int(math.max(time, t)), o, txt, xloc = xloc.bar_time, style = label.style_label_left, color = color.new(c, 100), textcolor = c, size = size.tiny)
+        n := array.size(s.lns)
+        if n > 0 and not na(s.lb)
+            int tx = int(math.max(time, line.get_x1(array.get(s.lns, n - 1))))
+            line.set_x2(array.get(s.lns, n - 1), tx)
+            label.set_x(s.lb, tx)
+
+// Pasangan SMT otomatis (korelasi positif; DXY = inverse).
+gx3_pairs() =>
+    string t = syminfo.ticker
+    string a = ""
+    string b = ""
+    bool ia = false
+    bool ib = false
+    if str.contains(t, "XAU") or str.startswith(t, "GC") or str.startswith(t, "MGC")
+        a := str.contains(t, "XAU") ? "XAGUSD" : "SI1!"
+        b := "TVC:DXY"
+        ib := true
+    else if str.contains(t, "XAG") or str.startswith(t, "SI")
+        a := str.contains(t, "XAG") ? "XAUUSD" : "GC1!"
+    else if str.startswith(t, "MNQ") or str.startswith(t, "NQ") or str.contains(t, "NAS100") or str.contains(t, "US100") or str.contains(t, "USTEC")
+        a := "ES1!"
+        b := "YM1!"
+    else if str.startswith(t, "MES") or str.startswith(t, "ES") or str.contains(t, "SPX") or str.contains(t, "US500")
+        a := "NQ1!"
+        b := "YM1!"
+    else if str.startswith(t, "MYM") or str.startswith(t, "YM") or str.contains(t, "US30") or str.contains(t, "DJ30")
+        a := "ES1!"
+        b := "NQ1!"
+    else if str.contains(t, "EURUSD")
+        a := "GBPUSD"
+        b := "TVC:DXY"
+        ib := true
+    else if str.contains(t, "GBPUSD")
+        a := "EURUSD"
+        b := "TVC:DXY"
+        ib := true
+    else if str.startswith(t, "BTC")
+        a := "ETHUSD"
+    else if str.startswith(t, "ETH")
+        a := "BTCUSD"
+    [a, ia, b, ib]
+
+// SMT: primer memperluas ≥ 1 tick, pembanding (di sekitar bar swing, radius 1) tidak mengikuti.
+// x_* = sisi relevan pembanding (inverse → sisi berlawanan). Data kosong → tidak ada keputusan (bukan "tak ada divergensi").
+gx3_smt_div(bool at_high, bool inv, float prim_prev, float prim_now, float x_prev, float x_now) =>
+    bool ext = at_high ? prim_now >= prim_prev + syminfo.mintick : prim_now <= prim_prev - syminfo.mintick
+    bool follow = false
+    bool ready = not na(x_prev) and not na(x_now)
+    if ready
+        follow := at_high ? (inv ? x_now < x_prev : x_now > x_prev) : (inv ? x_now > x_prev : x_now < x_prev)
+    ext and ready and not follow
+
+gx3_psp_f(float sp, float sc, bool inv) =>
+    not na(sp) and not na(sc) and sp != 0 and sc != 0 and ((sp == sc) == inv)
+
+gx3_mark(array<line> ls, array<label> lbs, float y, int t0, string txt, color c, bool up, int keep) =>
+    array.push(ls, line.new(t0, y, time, y, xloc = xloc.bar_time, color = c, style = line.style_dashed, width = 1))
+    array.push(lbs, label.new(int((t0 + time) / 2), y, txt, xloc = xloc.bar_time, style = up ? label.style_label_down : label.style_label_up, color = color.new(c, 100), textcolor = c, size = size.tiny))
+    gx3_trim_l(ls, keep)
+    gx3_trim_b(lbs, keep)
+
+gx3_ip_txt(string nm, float hi, float lo) =>
+    string r = nm + " n/a"
+    if not na(hi) and not na(lo) and hi > lo
+        float p = (close - lo) / (hi - lo) * 100
+        r := nm + " " + (p >= 50 ? "P" : "D") + str.tostring(math.round(p)) + "%"
     r
 
-f_po3Txt(int r) =>
-    r == 1 ? "BULL · Judas↓ → Dist↑" : r == 2 ? "BEAR · Judas↑ → Dist↓" : r == 3 ? "Dist ↑ (tanpa Judas)" : r == 4 ? "Dist ↓ (tanpa Judas)" : "AKUMULASI"
+gx3_row(table t, int r, string k, string v, string sz) =>
+    table.cell(t, 0, r, k, text_color = color.new(gx3_pn_tx, 35), text_size = sz, text_halign = text.align_left)
+    table.cell(t, 1, r, v, text_color = gx3_pn_tx, text_size = sz, text_halign = text.align_left)
 
-f_po3Short(int r) =>
-    r == 1 ? "Judas↓ → Dist↑" : r == 2 ? "Judas↑ → Dist↓" : r == 3 ? "Dist ↑" : r == 4 ? "Dist ↓" : "Akumulasi"
-
-// ---------------------------- DATA HTF -----------------------------
-bool htf1Ok = timeframe.in_seconds(htf1) >= timeframe.in_seconds()
-bool htf2Ok = timeframe.in_seconds(htf2) >= timeframe.in_seconds()
-
-float pdh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_on)
-float pdl = request.security(syminfo.tickerid, "D", low[1],  lookahead = barmerge.lookahead_on)
-float pwh = request.security(syminfo.tickerid, "W", high[1], lookahead = barmerge.lookahead_on)
-float pwl = request.security(syminfo.tickerid, "W", low[1],  lookahead = barmerge.lookahead_on)
-[o1, c1] = request.security(syminfo.tickerid, htf1, [open[1], close[1]], lookahead = barmerge.lookahead_on)
-[o2, c2] = request.security(syminfo.tickerid, htf2, [open[1], close[1]], lookahead = barmerge.lookahead_on)
-
-float dO  = request.security(syminfo.tickerid, "D", open, lookahead = barmerge.lookahead_on)
-float wO  = request.security(syminfo.tickerid, "W", open, lookahead = barmerge.lookahead_on)
-float mO  = request.security(syminfo.tickerid, "M", open, lookahead = barmerge.lookahead_on)
-float h2O = request.security(syminfo.tickerid, htf2, open, lookahead = barmerge.lookahead_on)
-
-int wTrend  = request.security(syminfo.tickerid, "W", f_trend(htfPivot))
-int dTrend  = request.security(syminfo.tickerid, "D", f_trend(htfPivot))
-int h1Trend = request.security(syminfo.tickerid, htf1, f_trend(htfPivot))
-int h2Trend = request.security(syminfo.tickerid, htf2, f_trend(htfPivot))
-
-// candle D1 kemarin + high/low hari ini (untuk SEQ GxT)
-[dO1, dC1] = request.security(syminfo.tickerid, "D", [open[1], close[1]], lookahead = barmerge.lookahead_on)
-float dATR  = request.security(syminfo.tickerid, "D", ta.atr(14)[1], lookahead = barmerge.lookahead_on)
-float dHnow = request.security(syminfo.tickerid, "D", high, lookahead = barmerge.lookahead_on)
-float dLnow = request.security(syminfo.tickerid, "D", low,  lookahead = barmerge.lookahead_on)
-
-bool newD  = timeframe.change("D")
-bool newW  = timeframe.change("W")
-bool newM  = timeframe.change("M")
-bool newH1 = timeframe.change(htf1)
-bool newH2 = timeframe.change(htf2)
-var int dStart  = 0
-var int wStart  = 0
-var int mStart  = 0
-var int h1Start = 0
-var int h2Start = 0
-if newD
-    dStart := bar_index
-if newW
-    wStart := bar_index
-if newM
-    mStart := bar_index
-if newH1
-    h1Start := bar_index
-if newH2
-    h2Start := bar_index
-
-// ---------------------------- STRUKTUR -----------------------------
-float ph  = ta.pivothigh(high, pivotLen, pivotLen)
-float pl  = ta.pivotlow(low, pivotLen, pivotLen)
-float atr = ta.atr(14)
-
-var float sh = na
-var int   shIdx = na
-var bool  shBrk = false
-var bool  shSwp = false
-var float psh = na
-var int   pshIdx = na
-
-var float sl = na
-var int   slIdx = na
-var bool  slBrk = false
-var bool  slSwp = false
-var float psl = na
-var int   pslIdx = na
-
-var int trend = 0
-var int lastSwpBar = -1000
-var int lastSwpDir = 0
-
-var array<line>  marksL   = array.new<line>()
-var array<label> marksB   = array.new<label>()
-var array<label> swingLbl = array.new<label>()
-var array<label> sweepTag = array.new<label>()
-
-if not na(ph)
-    psh := sh
-    pshIdx := shIdx
-    sh := ph
-    shIdx := bar_index - pivotLen
-    shBrk := false
-    shSwp := false
-    if showSwing
-        f_tag(shIdx, ph, na(psh) ? "H" : ph > psh ? "HH" : "LH", colLvl, label.style_label_down, swingLbl, 24)
-    if showEQ and not na(psh) and math.abs(ph - psh) <= atr * eqTol
-        f_mark(pshIdx, psh, shIdx, ph, "EQH", colBear, line.style_dotted,
-             math.round((pshIdx + shIdx) / 2.0), math.max(psh, ph), label.style_label_down, marksL, marksB, maxMarks)
-
-if not na(pl)
-    psl := sl
-    pslIdx := slIdx
-    sl := pl
-    slIdx := bar_index - pivotLen
-    slBrk := false
-    slSwp := false
-    if showSwing
-        f_tag(slIdx, pl, na(psl) ? "L" : pl > psl ? "HL" : "LL", colLvl, label.style_label_up, swingLbl, 24)
-    if showEQ and not na(psl) and math.abs(pl - psl) <= atr * eqTol
-        f_mark(pslIdx, psl, slIdx, pl, "EQL", colBull, line.style_dotted,
-             math.round((pslIdx + slIdx) / 2.0), math.min(psl, pl), label.style_label_up, marksL, marksB, maxMarks)
-
-bool bullBrk = barstate.isconfirmed and not na(sh) and not shBrk and close > sh
-bool bearBrk = barstate.isconfirmed and not na(sl) and not slBrk and close < sl
-
-if bullBrk
-    bool mss = trend == -1
-    if showBOS
-        f_mark(shIdx, sh, bar_index, sh, mss ? "MSS" : "BOS", colBull, mss ? line.style_solid : line.style_dashed,
-             math.round((shIdx + bar_index) / 2.0), sh, label.style_label_down, marksL, marksB, maxMarks)
-    shBrk := true
-    trend := 1
-
-if bearBrk
-    bool mss = trend == 1
-    if showBOS
-        f_mark(slIdx, sl, bar_index, sl, mss ? "MSS" : "BOS", colBear, mss ? line.style_solid : line.style_dashed,
-             math.round((slIdx + bar_index) / 2.0), sl, label.style_label_up, marksL, marksB, maxMarks)
-    slBrk := true
-    trend := -1
-
-// --------------------------- LIQUIDITY SWEEP -----------------------
-bool bslSw = showSweeps and barstate.isconfirmed and not na(sh) and not shBrk and not shSwp and high > sh and close < sh
-bool sslSw = showSweeps and barstate.isconfirmed and not na(sl) and not slBrk and not slSwp and low < sl and close > sl
-
-if bslSw
-    shSwp := true
-    lastSwpBar := bar_index
-    lastSwpDir := -1
-    f_mark(shIdx, sh, bar_index, sh, "Sweep", colBear, line.style_dotted,
-         bar_index, high, label.style_label_down, marksL, marksB, maxMarks)
-
-if sslSw
-    slSwp := true
-    lastSwpBar := bar_index
-    lastSwpDir := 1
-    f_mark(slIdx, sl, bar_index, sl, "Sweep", colBull, line.style_dotted,
-         bar_index, low, label.style_label_up, marksL, marksB, maxMarks)
-
-var bool pdhSw = false
-var bool pdlSw = false
-if newD
-    pdhSw := false
-    pdlSw := false
-
-if showSweeps and barstate.isconfirmed and not na(pdh) and not pdhSw and high > pdh and close < pdh
-    pdhSw := true
-    lastSwpBar := bar_index
-    lastSwpDir := -1
-    f_tag(bar_index, high, "PDH swept", colBear, label.style_label_down, sweepTag, 8)
-
-if showSweeps and barstate.isconfirmed and not na(pdl) and not pdlSw and low < pdl and close > pdl
-    pdlSw := true
-    lastSwpBar := bar_index
-    lastSwpDir := 1
-    f_tag(bar_index, low, "PDL swept", colBull, label.style_label_up, sweepTag, 8)
-
-// ---------------------------- DEALING RANGE ------------------------
-float eqP = (not na(sh) and not na(sl) and sh > sl) ? math.avg(sh, sl) : na
-string zoneTxt = na(eqP) ? "-" : close > eqP ? "PREMIUM" : close < eqP ? "DISCOUNT" : "EQ"
-
-// ------------------------------ KILL ZONE --------------------------
-var array<box> boxA = array.new<box>()
-var array<box> boxL = array.new<box>()
-var array<box> boxN = array.new<box>()
-bool sessOk = showSess and timeframe.in_seconds() <= 3600
-bool asiaAct   = f_session(asiaS,   sessTZ, "ASIA KZ",   color.gray,   92, line.style_solid, sessOk, maxSess, boxA)
-bool londonAct = f_session(londonS, sessTZ, "LONDON KZ", color.orange, 92, line.style_solid, sessOk, maxSess, boxL)
-bool nyAct     = f_session(nyS,     sessTZ, "NY KZ",     color.blue,   92, line.style_solid, sessOk, maxSess, boxN)
-string sessTxt = asiaAct ? "ASIA KZ" : londonAct ? "LONDON KZ" : nyAct ? "NY KZ" : "OFF"
-
-[aRefH, aRefL] = f_sessRef(asiaS,   sessTZ)
-[lRefH, lRefL] = f_sessRef(londonS, sessTZ)
-[nRefH, nRefL] = f_sessRef(nyS,     sessTZ)
-float hiWin = ta.highest(high, sessRevWin)
-float loWin = ta.lowest(low, sessRevWin)
-
-// -------------------- SILVER BULLET + MACRO TIME (NY) --------------
-string NY = "America/New_York"
-var array<box> boxS1 = array.new<box>()
-var array<box> boxS2 = array.new<box>()
-var array<box> boxS3 = array.new<box>()
-var array<box> boxS4 = array.new<box>()
-var array<box> boxS5 = array.new<box>()
-bool sbOk = showSBBox and timeframe.in_seconds() <= 3600
-bool sbLdn = f_session(sbLdnS, NY, "SB LDN",    colMacro, 100, line.style_dashed, sbOk, maxSess, boxS1)
-bool sbPre = f_session(sbPreS, NY, "SB NY PRE", colMacro, 100, line.style_dashed, sbOk, maxSess, boxS2)
-bool sbAm  = f_session(sbAmS,  NY, "SB NY AM",  colMacro, 100, line.style_dashed, sbOk, maxSess, boxS3)
-bool sbPm  = f_session(sbPmS,  NY, "SB NY PM",  colMacro, 100, line.style_dashed, sbOk, maxSess, boxS4)
-bool sbFin = f_session(sbFinS, NY, "SB FIN",    colMacro, 100, line.style_dashed, sbOk, maxSess, boxS5)
-bool sbAny = sbLdn or sbPre or sbAm or sbPm or sbFin
-string sbName = sbLdn ? "SB LDN" : sbPre ? "SB NY PRE" : sbAm ? "SB NY AM" : sbPm ? "SB NY PM" : sbFin ? "SB FIN" : ""
-
-int nyMin = minute(time, NY)
-
-bool ictMacro = f_in("0750-0810", NY) or f_in("0850-0910", NY) or f_in("0950-1010", NY) or f_in("1050-1110", NY) or f_in("1150-1210", NY) or f_in("1320-1340", NY) or f_in("1450-1510", NY) or f_in("1515-1545", NY) or f_in("1550-1610", NY)
-bool sbMacro  = sbAny and ((nyMin >= 20 and nyMin < 40) or nyMin >= 50 or nyMin < 10)
-bool macroNow = (showICTMacro and ictMacro) or (showSBMacro and sbMacro)
-
-bgcolor(macroNow ? color.new(colMacro, 93) : na, title = "Macro time")
-
-// key times: open xx:15 dan xx:45 di dalam jendela SB
-var array<line>  ktL = array.new<line>()
-var array<label> ktB = array.new<label>()
-bool k15 = sbAny and nyMin >= 15 and nz(nyMin[1], 99) < 15
-bool k45 = sbAny and nyMin >= 45 and nz(nyMin[1], 99) < 45
-int  nbKey = math.max(math.round(1500.0 / timeframe.in_seconds()), 1)
-
-if showKeyTimes and (k15 or k45) and timeframe.in_seconds() <= 900
-    line kl = line.new(bar_index, open, bar_index + nbKey, open, color = colMacro, style = line.style_dotted)
-    label kb = label.new(bar_index + nbKey, open, (k15 ? "xx:15" : "xx:45") + " open", style = label.style_label_left,
-         color = color.new(chart.bg_color, 100), textcolor = colMacro, size = size.tiny)
-    array.push(ktL, kl)
-    array.push(ktB, kb)
-    if array.size(ktL) > 10
-        line.delete(array.shift(ktL))
-        label.delete(array.shift(ktB))
-
-string timeTxt = (macroNow ? "MACRO · " : "") + (sbName != "" ? sbName : sessTxt)
-
-// ------------------------------ FVG / IFVG -------------------------
-var array<box>   fzBox = array.new<box>()
-var array<float> fzTop = array.new<float>()
-var array<float> fzBot = array.new<float>()
-var array<int>   fzDir = array.new<int>()
-var array<int>   fzSt  = array.new<int>()
-var array<label> ifvgTag = array.new<label>()
-
-var string lastIfvgTxt = "-"
-var int    lastIfvgDir = 0
-bool evBull = false
-bool evBear = false
-
-bool newBullFVG = barstate.isconfirmed and low > high[2] and (low - high[2]) > atr * fvgMin and close[1] > open[1]
-bool newBearFVG = barstate.isconfirmed and high < low[2] and (low[2] - high) > atr * fvgMin and close[1] < open[1]
-
-if newBullFVG or newBearFVG
-    bool bu = newBullFVG
-    float zt = bu ? low : low[2]
-    float zb = bu ? high[2] : high
-    color zc = bu ? colBull : colBear
-    box nb = box.new(bar_index - 2, zt, bar_index, zb, border_color = color.new(zc, 100),
-         bgcolor = color.new(zc, showFVG ? 88 : 100))
-    array.push(fzBox, nb)
-    array.push(fzTop, zt)
-    array.push(fzBot, zb)
-    array.push(fzDir, bu ? 1 : -1)
-    array.push(fzSt, 0)
-    if array.size(fzBox) > maxFVG
-        box.delete(array.shift(fzBox))
-        array.shift(fzTop)
-        array.shift(fzBot)
-        array.shift(fzDir)
-        array.shift(fzSt)
-
-if array.size(fzBox) > 0
-    for i = array.size(fzBox) - 1 to 0
-        box zx = array.get(fzBox, i)
-        float tp = array.get(fzTop, i)
-        float bt = array.get(fzBot, i)
-        int dr = array.get(fzDir, i)
-        int st = array.get(fzSt, i)
-        box.set_right(zx, bar_index)
-        bool rm = false
-        if barstate.isconfirmed
-            if st == 0
-                bool invUp = dr == -1 and close > tp
-                bool invDn = dr == 1 and close < bt
-                if invUp or invDn
-                    int invDir = invUp ? 1 : -1
-                    bool cM = macroNow
-                    bool cS = lastSwpDir == invDir and bar_index - lastSwpBar <= sweepWin
-                    bool cD = math.abs(close - open) >= atr * dispMin
-                    bool cA = (h2Trend == invDir or dTrend == invDir) and (invDir == 1 ? zoneTxt == "DISCOUNT" : zoneTxt == "PREMIUM")
-                    int score = (cM ? 1 : 0) + (cS ? 1 : 0) + (cD ? 1 : 0) + (cA ? 1 : 0)
-                    array.set(fzSt, i, 1)
-                    box.set_bgcolor(zx, color.new(color.gray, showIFVG ? 75 : 100))
-                    box.set_border_color(zx, color.new(color.gray, showIFVG ? 35 : 100))
-                    if showIFVG
-                        f_tag(bar_index, invDir == 1 ? low : high, "IFVG" + (invDir == 1 ? "↑ " : "↓ ") + str.tostring(score) + "/4",
-                             invDir == 1 ? colBull : colBear, invDir == 1 ? label.style_label_up : label.style_label_down, ifvgTag, 10)
-                    lastIfvgDir := invDir
-                    lastIfvgTxt := (invDir == 1 ? "BULL " : "BEAR ") + str.tostring(score) + "/4 · " + (cM ? "M" : "-") + (cS ? "S" : "-") + (cD ? "D" : "-") + (cA ? "A" : "-")
-                    if invDir == 1
-                        evBull := true
-                    else
-                        evBear := true
-            else
-                if (dr == 1 and close > tp) or (dr == -1 and close < bt)
-                    rm := true
-        if rm
-            box.delete(zx)
-            array.remove(fzBox, i)
-            array.remove(fzTop, i)
-            array.remove(fzBot, i)
-            array.remove(fzDir, i)
-            array.remove(fzSt, i)
-
-alertcondition(evBull, "IFVG Bullish", "Inversi FVG bullish terdeteksi")
-alertcondition(evBear, "IFVG Bearish", "Inversi FVG bearish terdeteksi")
-
-// ------------------------- OPEN BERDASARKAN WAKTU ------------------
-var array<int>    tMin = array.new<int>()
-var array<string> tLbl = array.new<string>()
-var array<float>  tPx  = array.new<float>()
-var array<int>    tIdx = array.new<int>()
-
+// ─── 3. OBJEK PERSISTEN ──────────────────────────────────────────────────
+var Gx3Lvl gx3_pdh_l = Gx3Lvl.new(name = "PDH")
+var Gx3Lvl gx3_pdl_l = Gx3Lvl.new(name = "PDL")
+var Gx3Lvl gx3_pwh_l = Gx3Lvl.new(name = "PWH")
+var Gx3Lvl gx3_pwl_l = Gx3Lvl.new(name = "PWL")
+var Gx3Lvl gx3_i20h  = Gx3Lvl.new(name = "IPDA 20D H")
+var Gx3Lvl gx3_i20l  = Gx3Lvl.new(name = "IPDA 20D L")
+var Gx3Lvl gx3_i40h  = Gx3Lvl.new(name = "IPDA 40D H")
+var Gx3Lvl gx3_i40l  = Gx3Lvl.new(name = "IPDA 40D L")
+var Gx3Lvl gx3_i60h  = Gx3Lvl.new(name = "IPDA 60D H")
+var Gx3Lvl gx3_i60l  = Gx3Lvl.new(name = "IPDA 60D L")
+var Gx3Sess gx3_s_as = Gx3Sess.new(lh = Gx3Lvl.new(name = "Asia H"), ll = Gx3Lvl.new(name = "Asia L"))
+var Gx3Sess gx3_s_lo = Gx3Sess.new(lh = Gx3Lvl.new(name = "London H"), ll = Gx3Lvl.new(name = "London L"))
+var Gx3Sess gx3_s_ny = Gx3Sess.new(lh = Gx3Lvl.new(name = "NY H"), ll = Gx3Lvl.new(name = "NY L"))
+var array<Gx3Lvl> gx3_levels = array.new<Gx3Lvl>()
 if barstate.isfirst
-    array<string> rows = str.split(openList, "\n")
-    for r in rows
-        string t = str.trim(r)
-        if str.length(t) > 0 and array.size(tMin) < 8
-            array<string> p = str.split(t, ",")
-            string hhmm = str.trim(array.get(p, 0))
-            if str.length(hhmm) == 4
-                float hh = str.tonumber(str.substring(hhmm, 0, 2))
-                float mm = str.tonumber(str.substring(hhmm, 2, 4))
-                if not na(hh) and not na(mm)
-                    array.push(tMin, int(hh) * 60 + int(mm))
-                    array.push(tLbl, array.size(p) > 1 ? str.trim(array.get(p, 1)) : hhmm)
-                    array.push(tPx, na)
-                    array.push(tIdx, -1)
+    array.push(gx3_levels, gx3_pdh_l)
+    array.push(gx3_levels, gx3_pdl_l)
+    array.push(gx3_levels, gx3_pwh_l)
+    array.push(gx3_levels, gx3_pwl_l)
+    array.push(gx3_levels, gx3_i20h)
+    array.push(gx3_levels, gx3_i20l)
+    array.push(gx3_levels, gx3_i40h)
+    array.push(gx3_levels, gx3_i40l)
+    array.push(gx3_levels, gx3_i60h)
+    array.push(gx3_levels, gx3_i60l)
+    array.push(gx3_levels, gx3_s_as.lh)
+    array.push(gx3_levels, gx3_s_as.ll)
+    array.push(gx3_levels, gx3_s_lo.lh)
+    array.push(gx3_levels, gx3_s_lo.ll)
+    array.push(gx3_levels, gx3_s_ny.lh)
+    array.push(gx3_levels, gx3_s_ny.ll)
 
-int  curMin   = hour(time, openTZ) * 60 + minute(time, openTZ)
-bool newDayTz = ta.change(dayofmonth(time, openTZ)) != 0
-bool openOk   = showTimeOpens and timeframe.in_seconds() <= 3600
+var Gx3Blk gx3_bq = Gx3Blk.new(arr = array.new<box>(), tags = array.new<label>())
+var Gx3Blk gx3_b9 = Gx3Blk.new(arr = array.new<box>(), tags = array.new<label>())
+var Gx3Blk gx3_bm = Gx3Blk.new(arr = array.new<box>(), tags = array.new<label>())
+var Gx3Slot gx3_o1s = Gx3Slot.new(lns = array.new<line>())
+var Gx3Slot gx3_o2s = Gx3Slot.new(lns = array.new<line>())
+var Gx3Slot gx3_o3s = Gx3Slot.new(lns = array.new<line>())
+var Gx3Slot gx3_o4s = Gx3Slot.new(lns = array.new<line>())
+var Gx3Slot gx3_o5s = Gx3Slot.new(lns = array.new<line>())
+var Gx3Slot gx3_o6s = Gx3Slot.new(lns = array.new<line>())
+var Gx3Slot gx3_ows = Gx3Slot.new(lns = array.new<line>())
+var Gx3Slot gx3_oms = Gx3Slot.new(lns = array.new<line>())
 
-if openOk and array.size(tMin) > 0
-    for i = 0 to array.size(tMin) - 1
-        int tg = array.get(tMin, i)
-        if curMin >= tg and (nz(curMin[1], -1) < tg or newDayTz)
-            array.set(tPx, i, open)
-            array.set(tIdx, i, bar_index)
+var array<line>  gx3_mk_ls = array.new<line>()
+var array<label> gx3_mk_lb = array.new<label>()
+var array<line>  gx3_sm_ls = array.new<line>()
+var array<label> gx3_sm_lb = array.new<label>()
+var array<label> gx3_c_lb  = array.new<label>()
+var array<label> gx3_ps_lb = array.new<label>()
 
-// ---------------------------------- PO3 ----------------------------
-string po3Auto_tf = switch timeframe.period
-    "1"   => "15"
-    "3"   => "30"
-    "5"   => "60"
-    "15"  => "240"
-    "30"  => "240"
-    "60"  => "D"
-    "240" => "W"
-    "D"   => "M"
-    => po3Manual
-string po3TF = po3Auto ? po3Auto_tf : po3Manual
-bool   po3Ok = timeframe.in_seconds(po3TF) > timeframe.in_seconds()
+// SMT: tanda IRL/ERL — ERL bila swing baru menembus level eksternal yang belum ditembus swing sebelumnya.
+gx3_erl_taken(bool at_high, float a, float b) =>
+    float lo = math.min(a, b)
+    float hi = math.max(a, b)
+    bool res = false
+    for lv in gx3_levels
+        if lv.is_high == at_high and not na(lv.px) and not na(lv.ln)
+            if lv.px >= lo and lv.px <= hi
+                res := true
+    res
 
-[q0o, q0h, q0l, q0c, q1o, q1h, q1l, q1c, q2o, q2h, q2l, q2c, q3o, q3h, q3l, q3c, qATR] = request.security(
-     syminfo.tickerid, po3TF,
-     [open, high, low, close, open[1], high[1], low[1], close[1], open[2], high[2], low[2], close[2], open[3], high[3], low[3], close[3], ta.atr(14)],
-     lookahead = barmerge.lookahead_on)
+// ─── 4. WAKTU: SIKLUS DQT ────────────────────────────────────────────────
+bool gx3_intra = timeframe.isintraday
+int  gx3_ah    = gx3_anchor == "18:00" ? 18 : 0
+int  gx3_a0    = timestamp(gx3_tz, year(time, gx3_tz), month(time, gx3_tz), dayofmonth(time, gx3_tz), gx3_ah, 0, 0)
+int  gx3_cyc   = time >= gx3_a0 ? gx3_a0 : gx3_a0 - 86400000
+int  gx3_el    = time - gx3_cyc
+int  gx3_qi    = math.min(3, int(math.floor(gx3_el / 21600000)))
+string gx3_qsfx = gx3_ah == 18 ? (gx3_qi == 0 ? " · A" : gx3_qi == 1 ? " · M" : gx3_qi == 2 ? " · D" : " · C/R") : ""
+string gx3_qtxt = "Q" + str.tostring(gx3_qi + 1) + gx3_qsfx
+color  gx3_qc   = gx3_qi == 0 ? color.rgb(150, 160, 180) : gx3_qi == 1 ? color.rgb(213, 157, 166) : gx3_qi == 2 ? color.rgb(143, 190, 157) : color.rgb(222, 190, 125)
 
-bool newP = timeframe.change(po3TF)
-var int po3Start = 0
-if newP
-    po3Start := bar_index
+gx3_blk_run(gx3_bq, gx3_q_on and gx3_intra, 21600000, gx3_qc, gx3_q_tr, gx3_q_keep * 4, gx3_q_tag, gx3_qtxt, gx3_cyc, gx3_el)
+gx3_blk_run(gx3_b9, gx3_9_on and gx3_intra, 5400000, gx3_qc, gx3_9_tr, gx3_sub_keep, false, "", gx3_cyc, gx3_el)
+gx3_blk_run(gx3_bm, gx3_m_on and gx3_intra, 1350000, gx3_qc, gx3_m_tr, gx3_sub_keep, false, "", gx3_cyc, gx3_el)
 
-int po3CloseT = time_close(po3TF)
-int po3Code   = f_po3(q0o, q0h, q0l, q0c, nz(qATR) * po3Thr)
-color po3Col  = (po3Code == 1 or po3Code == 3) ? colBull : (po3Code == 2 or po3Code == 4) ? colBear : colLvl
+// Profil hari: urutan terbentuknya high/low dalam siklus. Low lebih dulu = OLHC (profil bullish); high lebih dulu = OHLC (profil bearish).
+var float gx3_pf_hi   = na
+var float gx3_pf_lo   = na
+var int   gx3_pf_hi_t = na
+var int   gx3_pf_lo_t = na
+var string gx3_pf_prev = "—"
+bool gx3_new_cyc = ta.change(gx3_cyc) != 0 or barstate.isfirst
+if gx3_new_cyc
+    if not na(gx3_pf_hi_t) and not na(gx3_pf_lo_t)
+        gx3_pf_prev := gx3_pf_hi_t == gx3_pf_lo_t ? "—" : gx3_pf_lo_t < gx3_pf_hi_t ? "OLHC" : "OHLC"
+    gx3_pf_hi := high
+    gx3_pf_lo := low
+    gx3_pf_hi_t := time
+    gx3_pf_lo_t := time
+else
+    if high > gx3_pf_hi
+        gx3_pf_hi := high
+        gx3_pf_hi_t := time
+    if low < gx3_pf_lo
+        gx3_pf_lo := low
+        gx3_pf_lo_t := time
 
-// ------------------ GAMBAR LEVEL (hanya di bar terakhir) -----------
-var array<line>  lvL = array.new<line>()
-var array<label> lvB = array.new<label>()
-var array<box>   bxs = array.new<box>()
+// ─── 5. LIKUIDITAS ERL: PDH/PDL · PWH/PWL · IPDA · SESI ──────────────────
+bool gx3_chg_d   = timeframe.change("D")
+bool gx3_chg_w   = timeframe.change("W")
+bool gx3_below_d = timeframe.in_seconds() < timeframe.in_seconds("D")
+bool gx3_below_w = timeframe.in_seconds() < timeframe.in_seconds("W")
+bool gx3_below_m = timeframe.in_seconds() < timeframe.in_seconds("M")
 
-if barstate.islast
-    for l in lvL
-        line.delete(l)
-    for b in lvB
-        label.delete(b)
-    for x in bxs
-        box.delete(x)
-    array.clear(lvL)
-    array.clear(lvB)
-    array.clear(bxs)
+[gx3_pdh, gx3_pdl] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+[gx3_pwh, gx3_pwl] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+[gx3_h20, gx3_l20, gx3_h40, gx3_l40, gx3_h60, gx3_l60] = request.security(syminfo.tickerid, "D", [ta.highest(high, 20)[1], ta.lowest(low, 20)[1], ta.highest(high, 40)[1], ta.lowest(low, 40)[1], ta.highest(high, 60)[1], ta.lowest(low, 60)[1]], lookahead = barmerge.lookahead_on)
 
-    // --- level HTF
-    if showPDH
-        f_level(pdh, dStart, "PDH", colLvl, line.style_solid, lvL, lvB, lineExt)
-        f_level(pdl, dStart, "PDL", colLvl, line.style_solid, lvL, lvB, lineExt)
-    if showPWH
-        f_level(pwh, wStart, "PWH", colLvl, line.style_dashed, lvL, lvB, lineExt)
-        f_level(pwl, wStart, "PWL", colLvl, line.style_dashed, lvL, lvB, lineExt)
-    if showOCL2 and htf2Ok
-        f_level(o2, h2Start, f_tf(htf2) + " Open",  colLvl, line.style_dotted, lvL, lvB, lineExt)
-        f_level(c2, h2Start, f_tf(htf2) + " Close", colLvl, line.style_dotted, lvL, lvB, lineExt)
-    if showOCL1 and htf1Ok
-        f_level(o1, h1Start, f_tf(htf1) + " Open",  colLvl, line.style_dotted, lvL, lvB, lineExt)
-        f_level(c1, h1Start, f_tf(htf1) + " Close", colLvl, line.style_dotted, lvL, lvB, lineExt)
+bool gx3_ip20 = gx3_ip_sel == "20" or gx3_ip_sel == "Semua"
+bool gx3_ip40 = gx3_ip_sel == "40" or gx3_ip_sel == "Semua"
+bool gx3_ip60 = gx3_ip_sel == "60" or gx3_ip_sel == "Semua"
 
-    // --- opening prices (candle berjalan)
-    if showDO
-        f_level(dO, dStart, "D Open", colOpen, line.style_dotted, lvL, lvB, lineExt)
-    if showWO
-        f_level(wO, wStart, "W Open", colOpen, line.style_dotted, lvL, lvB, lineExt)
-    if showMO
-        f_level(mO, mStart, "M Open", colOpen, line.style_dotted, lvL, lvB, lineExt)
-    if showH2O and htf2Ok and not (showPO3 and po3Ok and po3TF == htf2)
-        f_level(h2O, h2Start, f_tf(htf2) + " Open", colOpen, line.style_dotted, lvL, lvB, lineExt)
+if gx3_lv_on and gx3_below_d
+    if gx3_pd_on and (gx3_chg_d or na(gx3_pdh_l.ln))
+        gx3_lvl_set(gx3_pdh_l, gx3_pdh, time, true, gx3_pd_col, gx3_lv_sty, true)
+        gx3_lvl_set(gx3_pdl_l, gx3_pdl, time, false, gx3_pd_col, gx3_lv_sty, true)
+    if gx3_ip20 and (gx3_chg_d or na(gx3_i20h.ln))
+        gx3_lvl_set(gx3_i20h, gx3_h20, time, true, gx3_ip_col, gx3_lv_sty, true)
+        gx3_lvl_set(gx3_i20l, gx3_l20, time, false, gx3_ip_col, gx3_lv_sty, true)
+    if gx3_ip40 and (gx3_chg_d or na(gx3_i40h.ln))
+        gx3_lvl_set(gx3_i40h, gx3_h40, time, true, gx3_ip_col, gx3_lv_sty, true)
+        gx3_lvl_set(gx3_i40l, gx3_l40, time, false, gx3_ip_col, gx3_lv_sty, true)
+    if gx3_ip60 and (gx3_chg_d or na(gx3_i60h.ln))
+        gx3_lvl_set(gx3_i60h, gx3_h60, time, true, gx3_ip_col, gx3_lv_sty, true)
+        gx3_lvl_set(gx3_i60l, gx3_l60, time, false, gx3_ip_col, gx3_lv_sty, true)
+if gx3_lv_on and gx3_below_w and gx3_pw_on and (gx3_chg_w or na(gx3_pwh_l.ln))
+    gx3_lvl_set(gx3_pwh_l, gx3_pwh, time, true, gx3_pw_col, gx3_lv_sty, true)
+    gx3_lvl_set(gx3_pwl_l, gx3_pwl, time, false, gx3_pw_col, gx3_lv_sty, true)
 
-    // --- opening prices (berdasarkan waktu)
-    if openOk and array.size(tMin) > 0
-        for i = 0 to array.size(tMin) - 1
-            if array.get(tIdx, i) >= 0
-                f_level(array.get(tPx, i), array.get(tIdx, i), array.get(tLbl, i) + " Open", colOpen, line.style_dotted, lvL, lvB, lineExt)
+bool gx3_ss_ok = gx3_ss_on and gx3_intra and timeframe.in_seconds() < timeframe.in_seconds(gx3_ss_tf)
+gx3_sess_run(gx3_s_as, gx3_ss_ok and gx3_as_on, gx3_as_se, gx3_as_co)
+gx3_sess_run(gx3_s_lo, gx3_ss_ok and gx3_lo_on, gx3_lo_se, gx3_lo_co)
+gx3_sess_run(gx3_s_ny, gx3_ss_ok and gx3_ny_on, gx3_ny_se, gx3_ny_co)
 
-    // --- dealing range + OTE
-    if not na(eqP)
-        int left = math.max(math.min(shIdx, slIdx), bar_index - 4500)
-        if showPD
-            array.push(bxs, box.new(left, sh, bar_index + lineExt, eqP,
-                 border_color = color.new(colBear, 100), bgcolor = color.new(colBear, 93)))
-            array.push(bxs, box.new(left, eqP, bar_index + lineExt, sl,
-                 border_color = color.new(colBull, 100), bgcolor = color.new(colBull, 93)))
-            f_level(eqP, left, "EQ 50%", colLvl, line.style_dashed, lvL, lvB, lineExt)
-        if showOTE
-            float rng = sh - sl
-            bool upLeg = slIdx < shIdx
-            float oA = upLeg ? sh - 0.62 * rng : sl + 0.62 * rng
-            float oB = upLeg ? sh - 0.79 * rng : sl + 0.79 * rng
-            float oI = upLeg ? sh - 0.705 * rng : sl + 0.705 * rng
-            array.push(bxs, box.new(left, math.max(oA, oB), bar_index + lineExt, math.min(oA, oB),
-                 border_color = color.new(#2962ff, 100), bgcolor = color.new(#2962ff, 90)))
-            f_level(oI, left, "OTE 0.705", #2962ff, line.style_dotted, lvL, lvB, lineExt)
+bool gx3_any_sweep = false
+var string gx3_ls_name = ""
+var int    gx3_ls_t    = na
+for lv in gx3_levels
+    if gx3_lvl_tick(lv)
+        gx3_any_sweep := true
+        gx3_ls_name := lv.name
+        gx3_ls_t := time
+        alert(lv.name + " ter-sweep (" + syminfo.ticker + ")", alert.freq_once_per_bar_close)
 
-    // --- PO3 candles
-    if showPO3 and po3Ok
-        int base = bar_index + po3Offset
-        color brd = color.new(chart.fg_color, 35)
-        bool swUp = q1h > q2h and q1c < q2h
-        bool swDn = q1l < q2l and q1c > q2l
+// ─── 6. OPENING PRICE ────────────────────────────────────────────────────
+string gx3_otf = gx3_op_on and gx3_intra ? "1" : timeframe.period
+[gx3_o1p, gx3_o1t] = request.security(syminfo.tickerid, gx3_otf, gx3_open_at(gx3_o1_h, gx3_o1_m))
+[gx3_o2p, gx3_o2t] = request.security(syminfo.tickerid, gx3_otf, gx3_open_at(gx3_o2_h, gx3_o2_m))
+[gx3_o3p, gx3_o3t] = request.security(syminfo.tickerid, gx3_otf, gx3_open_at(gx3_o3_h, gx3_o3_m))
+[gx3_o4p, gx3_o4t] = request.security(syminfo.tickerid, gx3_otf, gx3_open_at(gx3_o4_h, gx3_o4_m))
+[gx3_o5p, gx3_o5t] = request.security(syminfo.tickerid, gx3_otf, gx3_open_at(gx3_o5_h, gx3_o5_m))
+[gx3_o6p, gx3_o6t] = request.security(syminfo.tickerid, gx3_otf, gx3_open_at(gx3_o6_h, gx3_o6_m))
+[gx3_wop, gx3_wot] = request.security(syminfo.tickerid, "W", [open, time], lookahead = barmerge.lookahead_on)
+[gx3_mop, gx3_mot] = request.security(syminfo.tickerid, "M", [open, time], lookahead = barmerge.lookahead_on)
 
-        f_candle(base,     q3o, q3h, q3l, q3c, q3c > q3o ? color.new(colBull, 25) : color.new(colBear, 25), brd, bxs, lvL)
-        f_candle(base + 3, q2o, q2h, q2l, q2c, q2c > q2o ? color.new(colBull, 25) : color.new(colBear, 25), brd, bxs, lvL)
-        f_candle(base + 6, q1o, q1h, q1l, q1c, (swUp or swDn) ? color.new(color.orange, 20) : (q1c > q1o ? color.new(colBull, 25) : color.new(colBear, 25)), brd, bxs, lvL)
-        f_candle(base + 9, q0o, q0h, q0l, q0c, q0c > q0o ? color.new(colBull, 25) : color.new(colBear, 25), brd, bxs, lvL)
+bool gx3_op_ok = gx3_op_on and gx3_intra
+gx3_slot_run(gx3_o1s, gx3_op_ok and gx3_o1_on, gx3_o1p, gx3_o1t, gx3_op_keep, gx3_o1_c, gx3_op_txt(gx3_o1_h, gx3_o1_m))
+gx3_slot_run(gx3_o2s, gx3_op_ok and gx3_o2_on, gx3_o2p, gx3_o2t, gx3_op_keep, gx3_o2_c, gx3_op_txt(gx3_o2_h, gx3_o2_m))
+gx3_slot_run(gx3_o3s, gx3_op_ok and gx3_o3_on, gx3_o3p, gx3_o3t, gx3_op_keep, gx3_o3_c, gx3_op_txt(gx3_o3_h, gx3_o3_m))
+gx3_slot_run(gx3_o4s, gx3_op_ok and gx3_o4_on, gx3_o4p, gx3_o4t, gx3_op_keep, gx3_o4_c, gx3_op_txt(gx3_o4_h, gx3_o4_m))
+gx3_slot_run(gx3_o5s, gx3_op_ok and gx3_o5_on, gx3_o5p, gx3_o5t, gx3_op_keep, gx3_o5_c, gx3_op_txt(gx3_o5_h, gx3_o5_m))
+gx3_slot_run(gx3_o6s, gx3_op_ok and gx3_o6_on, gx3_o6p, gx3_o6t, gx3_op_keep, gx3_o6_c, gx3_op_txt(gx3_o6_h, gx3_o6_m))
+gx3_slot_run(gx3_ows, gx3_op_on and gx3_ow_on and gx3_below_w, gx3_wop, gx3_wot, gx3_op_keep, gx3_ow_c, "W Open")
+gx3_slot_run(gx3_oms, gx3_op_on and gx3_om_on and gx3_below_m, gx3_mop, gx3_mot, gx3_op_keep, gx3_om_c, "M Open")
 
-        float yTop = math.max(math.max(q0h, q1h), math.max(q2h, q3h))
-        f_lbl(base + 5, yTop, "PO3 · " + f_tf(po3TF), colLvl, label.style_label_down, lvB)
-        if swUp or swDn
-            f_lbl(base + 7, swUp ? q1h : q1l, "Sweep", color.orange, swUp ? label.style_label_down : label.style_label_up, lvB)
+// ─── 7. PEMBANDING SMT / PSP ─────────────────────────────────────────────
+[gx3_au1, gx3_ai1, gx3_au2, gx3_ai2] = gx3_pairs()
+bool   gx3_auto = gx3_pair_mode == "Auto"
+string gx3_sym1 = gx3_auto ? gx3_au1 : gx3_m1
+bool   gx3_inv1 = gx3_auto ? gx3_ai1 : gx3_m1i
+string gx3_sym2 = gx3_auto ? gx3_au2 : (gx3_m2_on ? gx3_m2 : "")
+bool   gx3_inv2 = gx3_auto ? gx3_ai2 : gx3_m2i
+bool   gx3_need = gx3_smt_on or gx3_psp_on
+bool   gx3_has1 = gx3_need and gx3_sym1 != ""
+bool   gx3_has2 = gx3_need and gx3_sym2 != ""
 
-        f_level(q0o, po3Start, f_tf(po3TF) + " Open", colOpen, line.style_solid, lvL, lvB, lineExt)
+[gx3_c1h, gx3_c1l, gx3_c1o, gx3_c1c] = request.security(gx3_has1 ? gx3_sym1 : syminfo.tickerid, timeframe.period, [high, low, open, close], gaps = barmerge.gaps_on, ignore_invalid_symbol = true)
+[gx3_c2h, gx3_c2l, gx3_c2o, gx3_c2c] = request.security(gx3_has2 ? gx3_sym2 : syminfo.tickerid, timeframe.period, [high, low, open, close], gaps = barmerge.gaps_on, ignore_invalid_symbol = true)
+bool gx3_ok1 = gx3_has1 and not na(gx3_c1c)
+bool gx3_ok2 = gx3_has2 and not na(gx3_c2c)
 
-        float midT = q1c > q1o ? (q1h + q1c) / 2 : (q1h + q1o) / 2
-        float midB = q1c > q1o ? (q1l + q1o) / 2 : (q1l + q1c) / 2
-        if showMidWick
-            array.push(lvL, line.new(base + 7, midT, base + 11, midT, color = colLvl, style = line.style_dashed))
-            array.push(lvL, line.new(base + 7, midB, base + 11, midB, color = colLvl, style = line.style_dashed))
-            if projMidWick
-                f_level(midT, po3Start, "0.5W▲", colLvl, line.style_dotted, lvL, lvB, lineExt)
-                f_level(midB, po3Start, "0.5W▼", colLvl, line.style_dotted, lvL, lvB, lineExt)
-        if showCE
-            float ceP = (q1h + q1l) / 2
-            array.push(lvL, line.new(base + 7, ceP, base + 11, ceP, color = colLvl, style = line.style_dotted))
-            if projMidWick
-                f_level(ceP, po3Start, "CE", colLvl, line.style_dotted, lvL, lvB, lineExt)
+// Sekitar bar swing (radius 1) pada pembanding; sisi dipilih menurut arah korelasi.
+float gx3_k1h = math.max(gx3_c1h[gx3_len - 1], gx3_c1h[gx3_len], gx3_c1h[gx3_len + 1])
+float gx3_k1l = math.min(gx3_c1l[gx3_len - 1], gx3_c1l[gx3_len], gx3_c1l[gx3_len + 1])
+float gx3_k2h = math.max(gx3_c2h[gx3_len - 1], gx3_c2h[gx3_len], gx3_c2h[gx3_len + 1])
+float gx3_k2l = math.min(gx3_c2l[gx3_len - 1], gx3_c2l[gx3_len], gx3_c2l[gx3_len + 1])
+float gx3_x1h = gx3_inv1 ? gx3_k1l : gx3_k1h
+float gx3_x1l = gx3_inv1 ? gx3_k1h : gx3_k1l
+float gx3_x2h = gx3_inv2 ? gx3_k2l : gx3_k2h
+float gx3_x2l = gx3_inv2 ? gx3_k2h : gx3_k2l
+var float gx3_px1h = na
+var float gx3_px1l = na
+var float gx3_px2h = na
+var float gx3_px2l = na
 
-        f_lbl(base + 12, q0c, f_po3Short(po3Code), po3Col, label.style_label_left, lvB)
+// ─── 8. STRUKTUR: SWING · DISPLACEMENT · MSS/BOS · IRL · C2/C3 ──────────
+float gx3_tick  = syminfo.mintick
+float gx3_ph    = gx3_pivot_high(gx3_len)
+float gx3_pl    = gx3_pivot_low(gx3_len)
+int   gx3_pv_t  = time[gx3_len]
+bool  gx3_new_sh = barstate.isconfirmed and not na(gx3_ph)
+bool  gx3_new_sl = barstate.isconfirmed and not na(gx3_pl)
 
-        if showCount and not na(po3CloseT)
-            int bl = math.min(math.max(math.round((po3CloseT - time) / (timeframe.in_seconds() * 1000.0)), 0), 480)
-            array.push(lvL, line.new(bar_index + bl, low, bar_index + bl, high, extend = extend.both,
-                 color = color.new(colLvl, 40), style = line.style_dotted, width = 1))
-            int rem = math.max(po3CloseT - timenow, 0)
-            int rs  = int(rem / 1000)
-            string cd = str.tostring(int(rs / 3600), "00") + ":" + str.tostring(int((rs % 3600) / 60), "00") + ":" + str.tostring(rs % 60, "00")
-            f_lbl(bar_index + bl, high, "close " + cd, colLvl, label.style_label_down, lvB)
+float gx3_body  = math.abs(close - open)
+float gx3_rng   = high - low
+float gx3_bmean = ta.sma(gx3_body, gx3_d_len)[1]
+bool  gx3_disp  = gx3_body > 0 and gx3_bmean > 0 and gx3_rng > 0 and gx3_body >= gx3_d_mult * gx3_bmean and gx3_body / gx3_rng >= gx3_d_frac
+bool  gx3_disp_up = gx3_disp and close > open
+bool  gx3_disp_dn = gx3_disp and close < open
 
-// ------------------------------ DASHBOARD --------------------------
-var table dash = table.new(f_pos(dashPos), 2, 11, bgcolor = color.new(chart.bg_color, 15), border_width = 0)
+plotshape(gx3_show_sw and gx3_new_sh, title = "GxT Swing High", style = shape.circle, location = location.abovebar, color = gx3_col_h, size = size.tiny, offset = -gx3_len)
+plotshape(gx3_show_sw and gx3_new_sl, title = "GxT Swing Low", style = shape.circle, location = location.belowbar, color = gx3_col_l, size = size.tiny, offset = -gx3_len)
 
-f_cell(int col, int row, string txt, color tc) =>
-    table.cell(dash, col, row, txt, text_color = tc, text_size = size.tiny, text_halign = text.align_left,
-         bgcolor = color.new(chart.bg_color, 15))
-    true
+var float gx3_sh   = na
+var float gx3_sl   = na
+var int   gx3_sh_t = na
+var int   gx3_sl_t = na
+var float gx3_sh_p = na
+var float gx3_sl_p = na
+var bool  gx3_sh_swept = false
+var bool  gx3_sl_swept = false
+var bool  gx3_sh_brk   = false
+var bool  gx3_sl_brk   = false
+var int   gx3_trend    = 0
+var int   gx3_mss_dir  = 0
+var int   gx3_mss_t    = na
+var string gx3_smt_last = "—"
+var int   gx3_psp_last_t = na
 
-f_tcol(int t) => t == 1 ? colBull : t == -1 ? colBear : chart.fg_color
+bool gx3_smt_up = false
+bool gx3_smt_dn = false
 
-// ---- SEQ GxT: Reversal / Continue / Aligned
-bool allUp = wTrend == 1 and dTrend == 1 and h2Trend == 1 and h1Trend == 1 and trend == 1
-bool allDn = wTrend == -1 and dTrend == -1 and h2Trend == -1 and h1Trend == -1 and trend == -1
+// SMT pada swing high baru (dievaluasi SEBELUM swing sebelumnya digantikan)
+if gx3_new_sh
+    if gx3_smt_on and not na(gx3_sh)
+        bool d1 = gx3_ok1 and gx3_smt_div(true, gx3_inv1, gx3_sh, gx3_ph, gx3_px1h, gx3_x1h)
+        bool d2 = gx3_ok2 and gx3_smt_div(true, gx3_inv2, gx3_sh, gx3_ph, gx3_px2h, gx3_x2h)
+        if d1 or d2
+            gx3_smt_dn := true
+            string nm = (d1 ? gx3_clean(gx3_sym1) : "") + (d1 and d2 ? "/" : "") + (d2 ? gx3_clean(gx3_sym2) : "")
+            string zn = gx3_erl_taken(true, gx3_sh, gx3_ph) ? "ERL" : "IRL"
+            array.push(gx3_sm_ls, line.new(gx3_sh_t, gx3_sh, gx3_pv_t, gx3_ph, xloc = xloc.bar_time, color = gx3_smt_col, style = line.style_dotted, width = 1))
+            array.push(gx3_sm_lb, label.new(gx3_pv_t, gx3_ph, "SMT·" + zn + " " + nm, xloc = xloc.bar_time, style = label.style_label_down, color = color.new(gx3_smt_col, 100), textcolor = gx3_smt_col, size = size.tiny))
+            gx3_trim_l(gx3_sm_ls, gx3_keep_mk)
+            gx3_trim_b(gx3_sm_lb, gx3_keep_mk)
+            gx3_smt_last := "↓ " + zn + " " + nm + " " + gx3_hhmm(time)
+    gx3_px1h := gx3_x1h
+    gx3_px2h := gx3_x2h
+    gx3_sh_p := gx3_sh
+    gx3_sh := gx3_ph
+    gx3_sh_t := gx3_pv_t
+    gx3_sh_swept := false
+    gx3_sh_brk := false
 
-float dMid = math.avg(pdh, pdl)
-bool dExpBear = dC1 < dO1 and (dO1 - dC1) >= nz(dATR) * seqExp
-bool dExpBull = dC1 > dO1 and (dC1 - dO1) >= nz(dATR) * seqExp
+if gx3_new_sl
+    if gx3_smt_on and not na(gx3_sl)
+        bool d1 = gx3_ok1 and gx3_smt_div(false, gx3_inv1, gx3_sl, gx3_pl, gx3_px1l, gx3_x1l)
+        bool d2 = gx3_ok2 and gx3_smt_div(false, gx3_inv2, gx3_sl, gx3_pl, gx3_px2l, gx3_x2l)
+        if d1 or d2
+            gx3_smt_up := true
+            string nm = (d1 ? gx3_clean(gx3_sym1) : "") + (d1 and d2 ? "/" : "") + (d2 ? gx3_clean(gx3_sym2) : "")
+            string zn = gx3_erl_taken(false, gx3_sl, gx3_pl) ? "ERL" : "IRL"
+            array.push(gx3_sm_ls, line.new(gx3_sl_t, gx3_sl, gx3_pv_t, gx3_pl, xloc = xloc.bar_time, color = gx3_smt_col, style = line.style_dotted, width = 1))
+            array.push(gx3_sm_lb, label.new(gx3_pv_t, gx3_pl, "SMT·" + zn + " " + nm, xloc = xloc.bar_time, style = label.style_label_up, color = color.new(gx3_smt_col, 100), textcolor = gx3_smt_col, size = size.tiny))
+            gx3_trim_l(gx3_sm_ls, gx3_keep_mk)
+            gx3_trim_b(gx3_sm_lb, gx3_keep_mk)
+            gx3_smt_last := "↑ " + zn + " " + nm + " " + gx3_hhmm(time)
+    gx3_px1l := gx3_x1l
+    gx3_px2l := gx3_x2l
+    gx3_sl_p := gx3_sl
+    gx3_sl := gx3_pl
+    gx3_sl_t := gx3_pv_t
+    gx3_sl_swept := false
+    gx3_sl_brk := false
 
-bool dHigh = dHnow > pdh and close < pdh
-bool wHigh = dHnow > pwh and close < pwh
-bool aHigh = sessOk and hiWin > aRefH and close < aRefH
-bool lHigh = sessOk and hiWin > lRefH and close < lRefH
-bool nHigh = sessOk and hiWin > nRefH and close < nRefH
-bool dLow = dLnow < pdl and close > pdl
-bool wLow = dLnow < pwl and close > pwl
-bool aLow = sessOk and loWin < aRefL and close > aRefL
-bool lLow = sessOk and loWin < lRefL and close > lRefL
-bool nLow = sessOk and loWin < nRefL and close > nRefL
+// Trend: HH + HL = bullish, LH + LL = bearish (ICT_RULES)
+if gx3_new_sh or gx3_new_sl
+    if not na(gx3_sh_p) and not na(gx3_sl_p) and not na(gx3_sh) and not na(gx3_sl)
+        if gx3_sh > gx3_sh_p and gx3_sl > gx3_sl_p
+            gx3_trend := 1
+        else if gx3_sh < gx3_sh_p and gx3_sl < gx3_sl_p
+            gx3_trend := -1
 
-bool rD = dHigh or wHigh or aHigh or lHigh or nHigh
-bool rU = dLow or wLow or aLow or lLow or nLow
-bool revDn = rD and not rU
-bool revUp = rU and not rD
-string revSrc = revDn ? (dHigh ? "PDH" : wHigh ? "PWH" : aHigh ? "Asia H" : lHigh ? "London H" : "NY H") : revUp ? (dLow ? "PDL" : wLow ? "PWL" : aLow ? "Asia L" : lLow ? "London L" : "NY L") : ""
+// MSS / BOS — close ≥ 1 tick menembus swing terkonfirmasi, satu kali per swing.
+bool gx3_mss_up = false
+bool gx3_mss_dn = false
+bool gx3_bos_up = false
+bool gx3_bos_dn = false
+if barstate.isconfirmed
+    if not na(gx3_sh) and not gx3_sh_brk and close >= gx3_sh + gx3_tick
+        if gx3_trend == -1 and gx3_disp_up
+            gx3_mss_up := true
+        else if gx3_trend == 1
+            gx3_bos_up := true
+        if gx3_mss_up or gx3_bos_up
+            gx3_sh_brk := true
+            if gx3_mss_up
+                gx3_trend := 1
+                gx3_mss_dir := 1
+                gx3_mss_t := time
+            if (gx3_mss_up and gx3_show_mss) or (gx3_bos_up and gx3_show_bos)
+                gx3_mark(gx3_mk_ls, gx3_mk_lb, gx3_sh, gx3_sh_t, gx3_mss_up ? "MSS ▲" : "BOS ▲", gx3_mss_up ? gx3_col_mss : gx3_col_bos, true, gx3_keep_mk)
+    if not na(gx3_sl) and not gx3_sl_brk and close <= gx3_sl - gx3_tick
+        if gx3_trend == 1 and gx3_disp_dn
+            gx3_mss_dn := true
+        else if gx3_trend == -1
+            gx3_bos_dn := true
+        if gx3_mss_dn or gx3_bos_dn
+            gx3_sl_brk := true
+            if gx3_mss_dn
+                gx3_trend := -1
+                gx3_mss_dir := -1
+                gx3_mss_t := time
+            if (gx3_mss_dn and gx3_show_mss) or (gx3_bos_dn and gx3_show_bos)
+                gx3_mark(gx3_mk_ls, gx3_mk_lb, gx3_sl, gx3_sl_t, gx3_mss_dn ? "MSS ▼" : "BOS ▼", gx3_mss_dn ? gx3_col_mss : gx3_col_bos, false, gx3_keep_mk)
 
-bool contDn = dExpBear and close < dMid
-bool contUp = dExpBull and close > dMid
+// C2 = sweep swing (high/low menembus ≥ 1 tick) + close kembali ke dalam; C3 = swing pembalik valid setelahnya
+// yang tidak menembus ekstrem C2. Bila ekstrem C2 ditembus lebih dulu → "xC2". Bar yang menyapu dua sisi dibatalkan.
+var int   gx3_pend     = 0
+var int   gx3_pend_bar = na
+var float gx3_pend_ext = na
+var label gx3_c2_lb    = na
+bool gx3_c2_dn = false
+bool gx3_c2_up = false
+bool gx3_c3_dn = false
+bool gx3_c3_up = false
+if barstate.isconfirmed
+    if gx3_pend != 0 and bar_index > gx3_pend_bar
+        bool broken = gx3_pend == -1 ? high > gx3_pend_ext : low < gx3_pend_ext
+        if broken
+            if not na(gx3_c2_lb)
+                label.set_text(gx3_c2_lb, "xC2")
+                label.set_textcolor(gx3_c2_lb, color.red)
+            gx3_pend := 0
+        else if bar_index - gx3_pend_bar > gx3_c3_win
+            gx3_pend := 0
+    if gx3_pend == -1 and gx3_new_sh and bar_index - gx3_len > gx3_pend_bar
+        gx3_c3_dn := true
+        gx3_pend := 0
+        if gx3_show_c3
+            array.push(gx3_c_lb, label.new(gx3_pv_t, gx3_ph, "C3 ✓", xloc = xloc.bar_time, style = label.style_label_down, color = color.new(gx3_col_h, 100), textcolor = gx3_col_h, size = size.tiny))
+    if gx3_pend == 1 and gx3_new_sl and bar_index - gx3_len > gx3_pend_bar
+        gx3_c3_up := true
+        gx3_pend := 0
+        if gx3_show_c3
+            array.push(gx3_c_lb, label.new(gx3_pv_t, gx3_pl, "C3 ✓", xloc = xloc.bar_time, style = label.style_label_up, color = color.new(gx3_col_l, 100), textcolor = gx3_col_l, size = size.tiny))
+    bool cdn = not na(gx3_sh) and not gx3_sh_swept and not gx3_sh_brk and high >= gx3_sh + gx3_tick and close < gx3_sh
+    bool cup = not na(gx3_sl) and not gx3_sl_swept and not gx3_sl_brk and low <= gx3_sl - gx3_tick and close > gx3_sl
+    if cdn and cup
+        cdn := false
+        cup := false
+    if cdn
+        gx3_c2_dn := true
+        gx3_sh_swept := true
+        gx3_pend := -1
+        gx3_pend_bar := bar_index
+        gx3_pend_ext := high
+        if gx3_show_c2
+            gx3_c2_lb := label.new(time, high, "C2", xloc = xloc.bar_time, style = label.style_label_down, color = color.new(gx3_col_h, 100), textcolor = gx3_col_h, size = size.tiny)
+            array.push(gx3_c_lb, gx3_c2_lb)
+    if cup
+        gx3_c2_up := true
+        gx3_sl_swept := true
+        gx3_pend := 1
+        gx3_pend_bar := bar_index
+        gx3_pend_ext := low
+        if gx3_show_c2
+            gx3_c2_lb := label.new(time, low, "C2", xloc = xloc.bar_time, style = label.style_label_up, color = color.new(gx3_col_l, 100), textcolor = gx3_col_l, size = size.tiny)
+            array.push(gx3_c_lb, gx3_c2_lb)
+    gx3_trim_b(gx3_c_lb, gx3_keep_mk * 2)
 
-string seqTxt = revDn ? "REVERSAL ↓ · " + revSrc : revUp ? "REVERSAL ↑ · " + revSrc : contDn ? "CONTINUE ↓" : contUp ? "CONTINUE ↑" : allUp ? "ALIGNED ↑" : allDn ? "ALIGNED ↓" : "MIXED"
-bool seqUp = revUp or contUp or (allUp and not revDn and not contDn)
-bool seqDn = revDn or contDn or (allDn and not revUp and not contUp)
-string profTxt = asiaAct ? "ASIA · protraksi" : londonAct ? "LONDON · reversal" : nyAct ? "NY · continue" : "-"
+// IRL terbaru: rentang antara swing high & swing low terkonfirmasi terakhir (+ EQ 50%).
+var box   gx3_irl_bx = na
+var line  gx3_irl_eq = na
+var label gx3_irl_tg = na
+if gx3_show_irl and not na(gx3_sh) and not na(gx3_sl) and not na(gx3_sh_t) and not na(gx3_sl_t)
+    int   irl_l  = math.min(gx3_sh_t, gx3_sl_t)
+    float irl_tp = math.max(gx3_sh, gx3_sl)
+    float irl_bt = math.min(gx3_sh, gx3_sl)
+    float irl_md = (irl_tp + irl_bt) * 0.5
+    if na(gx3_irl_bx)
+        gx3_irl_bx := box.new(irl_l, irl_tp, time, irl_bt, xloc = xloc.bar_time, bgcolor = gx3_col_irl, border_color = color.new(gx3_col_irl, 40), border_width = 1)
+    else
+        box.set_left(gx3_irl_bx, irl_l)
+        box.set_right(gx3_irl_bx, time)
+        box.set_top(gx3_irl_bx, irl_tp)
+        box.set_bottom(gx3_irl_bx, irl_bt)
+    if gx3_show_eq
+        if na(gx3_irl_eq)
+            gx3_irl_eq := line.new(irl_l, irl_md, time, irl_md, xloc = xloc.bar_time, color = gx3_col_eq, style = line.style_dotted, width = 1)
+        else
+            line.set_xy1(gx3_irl_eq, irl_l, irl_md)
+            line.set_xy2(gx3_irl_eq, time, irl_md)
+    if na(gx3_irl_tg)
+        gx3_irl_tg := label.new(time, irl_md, "IRL", xloc = xloc.bar_time, style = label.style_label_left, color = color.new(gx3_col_irl, 100), textcolor = gx3_col_eq, size = size.tiny)
+    else
+        label.set_xy(gx3_irl_tg, time, irl_md)
 
-if barstate.islast and showDash
-    f_cell(0, 0, "W1", chart.fg_color)
-    f_cell(1, 0, f_txt(wTrend), f_tcol(wTrend))
-    f_cell(0, 1, "D1", chart.fg_color)
-    f_cell(1, 1, f_txt(dTrend), f_tcol(dTrend))
-    f_cell(0, 2, f_tf(htf2), chart.fg_color)
-    f_cell(1, 2, htf2Ok ? f_txt(h2Trend) : "-", htf2Ok ? f_tcol(h2Trend) : chart.fg_color)
-    f_cell(0, 3, f_tf(htf1), chart.fg_color)
-    f_cell(1, 3, htf1Ok ? f_txt(h1Trend) : "-", htf1Ok ? f_tcol(h1Trend) : chart.fg_color)
-    f_cell(0, 4, "LTF " + timeframe.period, chart.fg_color)
-    f_cell(1, 4, f_txt(trend), f_tcol(trend))
-    f_cell(0, 5, "SEQ", chart.fg_color)
-    f_cell(1, 5, seqTxt, seqUp ? colBull : seqDn ? colBear : chart.fg_color)
-    f_cell(0, 6, "ZONE", chart.fg_color)
-    f_cell(1, 6, zoneTxt, zoneTxt == "PREMIUM" ? colBear : zoneTxt == "DISCOUNT" ? colBull : chart.fg_color)
-    f_cell(0, 7, "TIME", chart.fg_color)
-    f_cell(1, 7, timeTxt, macroNow ? colMacro : chart.fg_color)
-    f_cell(0, 8, "PO3 " + f_tf(po3TF), chart.fg_color)
-    f_cell(1, 8, po3Ok ? f_po3Txt(po3Code) : "-", po3Ok ? po3Col : chart.fg_color)
-    f_cell(0, 9, "IFVG", chart.fg_color)
-    f_cell(1, 9, lastIfvgTxt, lastIfvgDir == 1 ? colBull : lastIfvgDir == -1 ? colBear : chart.fg_color)
-    f_cell(0, 10, "PROFILE", chart.fg_color)
-    f_cell(1, 10, profTxt, chart.fg_color)
+// ─── 9. PSP ──────────────────────────────────────────────────────────────
+// Candle tertutup primer dan pembanding berwarna tidak selaras dengan korelasinya (inverse: warna sama).
+if gx3_psp_on and barstate.isconfirmed and (not gx3_psp_ctx or gx3_any_sweep or gx3_c2_up or gx3_c2_dn)
+    float sp = math.sign(close - open)
+    bool p1 = gx3_ok1 and gx3_psp_f(sp, math.sign(gx3_c1c - gx3_c1o), gx3_inv1)
+    bool p2 = gx3_ok2 and gx3_psp_f(sp, math.sign(gx3_c2c - gx3_c2o), gx3_inv2)
+    if p1 or p2
+        gx3_psp_last_t := time
+        array.push(gx3_ps_lb, label.new(time, sp > 0 ? low : high, "PSP", xloc = xloc.bar_time, style = sp > 0 ? label.style_label_up : label.style_label_down, color = color.new(gx3_smt_col, 100), textcolor = gx3_smt_col, size = size.tiny))
+        gx3_trim_b(gx3_ps_lb, gx3_keep_mk)
+
+// ─── 10. PANEL NARASI ────────────────────────────────────────────────────
+var table gx3_tbl = na
+string gx3_pn_size = gx3_pn_sz == "Tiny" ? size.tiny : gx3_pn_sz == "Normal" ? size.normal : size.small
+if barstate.islast and gx3_pn_on
+    if na(gx3_tbl)
+        gx3_tbl := table.new(gx3_tpos(gx3_pn_pos), 2, 10, bgcolor = gx3_pn_bg, frame_color = color.new(color.gray, 60), frame_width = 1)
+    float up_px = na
+    string up_nm = ""
+    float dn_px = na
+    string dn_nm = ""
+    for lv in gx3_levels
+        if not lv.swept and not na(lv.px) and not na(lv.ln)
+            if lv.px > close and (na(up_px) or lv.px < up_px)
+                up_px := lv.px
+                up_nm := lv.name
+            if lv.px < close and (na(dn_px) or lv.px > dn_px)
+                dn_px := lv.px
+                dn_nm := lv.name
+    if not na(gx3_sh) and not gx3_sh_brk and gx3_sh > close and (na(up_px) or gx3_sh < up_px)
+        up_px := gx3_sh
+        up_nm := "Swing H"
+    if not na(gx3_sl) and not gx3_sl_brk and gx3_sl < close and (na(dn_px) or gx3_sl > dn_px)
+        dn_px := gx3_sl
+        dn_nm := "Swing L"
+    string t_up = na(up_px) ? "—" : up_nm + " " + str.tostring(up_px, format.mintick) + " (+" + str.tostring(up_px - close, format.mintick) + ")"
+    string t_dn = na(dn_px) ? "—" : dn_nm + " " + str.tostring(dn_px, format.mintick) + " (−" + str.tostring(close - dn_px, format.mintick) + ")"
+    string t_pf = gx3_pf_hi_t == gx3_pf_lo_t ? "berkembang" : gx3_pf_lo_t < gx3_pf_hi_t ? "OLHC · low lebih dulu" : "OHLC · high lebih dulu"
+    string t_st = (gx3_trend == 1 ? "Bullish" : gx3_trend == -1 ? "Bearish" : "Belum terklasifikasi") + (na(gx3_mss_t) ? "" : " · MSS " + (gx3_mss_dir == 1 ? "▲ " : "▼ ") + gx3_hhmm(gx3_mss_t))
+    string t_irl = "—"
+    if not na(gx3_sh) and not na(gx3_sl) and gx3_sh != gx3_sl
+        float tp = math.max(gx3_sh, gx3_sl)
+        float bt = math.min(gx3_sh, gx3_sl)
+        float pc = (close - bt) / (tp - bt) * 100
+        t_irl := (pc >= 50 ? "Premium " : "Discount ") + str.tostring(math.round(pc)) + "% · EQ " + str.tostring((tp + bt) / 2, format.mintick)
+    string t_pair = gx3_has1 ? (gx3_ok1 ? "" : "data pembanding belum siap · ") : "tanpa pembanding · "
+    string t_sw = gx3_ls_name == "" ? "—" : gx3_ls_name + " ✕ " + gx3_hhmm(gx3_ls_t)
+    gx3_row(gx3_tbl, 0, "GxT · NARASI", syminfo.ticker + " · " + timeframe.period, gx3_pn_size)
+    gx3_row(gx3_tbl, 1, "Waktu", gx3_hhmm(time) + " · " + gx3_qtxt, gx3_pn_size)
+    gx3_row(gx3_tbl, 2, "Profil hari", t_pf + " (kemarin " + gx3_pf_prev + ")", gx3_pn_size)
+    gx3_row(gx3_tbl, 3, "Struktur", t_st, gx3_pn_size)
+    gx3_row(gx3_tbl, 4, "IRL", t_irl, gx3_pn_size)
+    gx3_row(gx3_tbl, 5, "IPDA", gx3_ip_txt("20D", gx3_h20, gx3_l20) + " · " + gx3_ip_txt("40D", gx3_h40, gx3_l40) + " · " + gx3_ip_txt("60D", gx3_h60, gx3_l60), gx3_pn_size)
+    gx3_row(gx3_tbl, 6, "ERL ▲", t_up, gx3_pn_size)
+    gx3_row(gx3_tbl, 7, "ERL ▼", t_dn, gx3_pn_size)
+    gx3_row(gx3_tbl, 8, "Sweep terakhir", t_sw, gx3_pn_size)
+    gx3_row(gx3_tbl, 9, "SMT · PSP", t_pair + gx3_smt_last + " · PSP " + (na(gx3_psp_last_t) ? "—" : gx3_hhmm(gx3_psp_last_t)), gx3_pn_size)
+
+// ─── 11. ALERT ───────────────────────────────────────────────────────────
+alertcondition(gx3_mss_up, "GxT MSS Bullish", "GxT MSS bullish: displacement menembus swing high")
+alertcondition(gx3_mss_dn, "GxT MSS Bearish", "GxT MSS bearish: displacement menembus swing low")
+alertcondition(gx3_c2_up, "GxT C2 Bullish (sell-side sweep)", "GxT C2 bullish: swing low disapu, close kembali ke dalam")
+alertcondition(gx3_c2_dn, "GxT C2 Bearish (buy-side sweep)", "GxT C2 bearish: swing high disapu, close kembali ke dalam")
+alertcondition(gx3_c3_up, "GxT C3 Bullish tervalidasi", "GxT C3 bullish: swing low pembalik terkonfirmasi")
+alertcondition(gx3_c3_dn, "GxT C3 Bearish tervalidasi", "GxT C3 bearish: swing high pembalik terkonfirmasi")
+alertcondition(gx3_smt_up or gx3_smt_dn, "GxT SMT Divergence", "GxT SMT divergence terdeteksi pada swing terkonfirmasi")
+alertcondition(gx3_any_sweep, "GxT Level ERL ter-sweep", "GxT: level ERL (PDH/PDL/PWH/PWL/IPDA/sesi) ter-sweep")
